@@ -6,8 +6,8 @@ import subprocess
 import platform
 try:
     import pyautogui
-except ImportError:
-    pyautogui = None
+except (ImportError, KeyError):
+    pyautogui = None  # KeyError when DISPLAY unset (VPS/headless)
 try:
     import pyperclip
 except ImportError:
