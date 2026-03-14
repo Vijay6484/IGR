@@ -1,3 +1,11 @@
+"""
+TEST SCRIPT: Same as 5.py but limited scope for testing.
+- Year: 2026 only
+- 1st district only
+- 1st tehsil only
+- 15th village only
+- Property numbers: 1 to 20
+"""
 import os
 import sys
 import time
@@ -179,9 +187,9 @@ def make_safe_print(year):
     return safe_print_inner
 
 def init_year_directories(year):
-    """Initialize year-specific directories"""
+    """Initialize year-specific directories - TEST: uses test_scraped folder"""
     CURRENT_DIR = os.getcwd()
-    OUTPUT_DIR = os.path.join(CURRENT_DIR, "scraper_output", year)
+    OUTPUT_DIR = os.path.join(CURRENT_DIR, "test_scraped", year)
     SCREENSHOT_DIR = os.path.join(OUTPUT_DIR, "screenshots")
     LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
     
@@ -1970,8 +1978,9 @@ def run_scraper_for_year(year, window_position):
         
         district_options = get_dropdown_options_safe(driver, "ddlDistrict1")
         safe_print(f"[INFO] Found {len(district_options)} districts to process")
+        safe_print("[TEST] Processing 1st district only")
         
-        for d_name, d_val in district_options:
+        for d_name, d_val in district_options[:1]:
             if os.path.exists(STOP_FILE):
                 break
             safe_print(f"\n[DISTRICT] Processing {d_name}")
@@ -1986,8 +1995,9 @@ def run_scraper_for_year(year, window_position):
                 
             tahsil_options = get_dropdown_options_safe(driver, "ddltahsil")
             safe_print(f"[INFO] Found {len(tahsil_options)} tahsils in district {d_name}")
+            safe_print("[TEST] Processing 1st tehsil only")
             
-            for t_name, t_val in tahsil_options:
+            for t_name, t_val in tahsil_options[:1]:
                 if os.path.exists(STOP_FILE):
                     break
                 safe_print(f"[TAHSIL] Processing {t_name}")
@@ -2001,8 +2011,12 @@ def run_scraper_for_year(year, window_position):
                     safe_print(f"[ERROR] No villages found for tahsil {t_name}")
                     continue
                 safe_print(f"[INFO] Found {len(village_options)} villages in tahsil {t_name}")
+                if len(village_options) < 15:
+                    safe_print(f"[ERROR] Tahsil has only {len(village_options)} villages, need 15th. Skipping.")
+                    continue
+                safe_print("[TEST] Processing 15th village only")
                 
-                for v_name, v_val in village_options:
+                for v_name, v_val in village_options[14:15]:
                     if os.path.exists(STOP_FILE):
                         break
                     safe_print(f"[VILLAGE] Processing {v_name}")
@@ -2200,11 +2214,10 @@ def run_years_in_batches(years_to_scrape, max_concurrent):
     print("All scrapers have completed")
 
 def main():
-    """Main function to initiate multi-year scraping"""
-    # Years to scrape - modify as needed
-    years_to_scrape = [str(year) for year in range(2026, 1984, -1)]  
+    """Main function - TEST: 2026 only, 1 district, 1 tehsil, 15th village, properties 1-20"""
+    years_to_scrape = ["2026"]
+    print("[TEST] Running test script: year 2026, 1st district, 1st tehsil, 15th village, properties 1-20")
     
-    # Run the scraper in batches
     run_years_in_batches(years_to_scrape, MAX_CONCURRENT_PROCESSES)
 
 if __name__ == "__main__":
