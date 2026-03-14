@@ -70,12 +70,13 @@ if VPS_MODE:
 BRAVE_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 
 # Paths to Chrome/Chromium on Linux VPS (checked in order when VPS_MODE is True).
-# Install on Ubuntu/Debian: sudo apt install chromium-browser  OR  google-chrome-stable
+# Install: sudo apt update && sudo apt install -y chromium  (Ubuntu 22.04+)
+# Or Google Chrome: https://www.google.com/chrome/
 CHROME_PATHS_LINUX = [
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",           # apt install chromium (Ubuntu 22.04+)
     "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
     "/snap/bin/chromium",
 ]
 
