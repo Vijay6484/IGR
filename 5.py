@@ -2010,7 +2010,7 @@ def run_scraper_for_year(year, window_position):
                     key = f"{year}|{d_name}|{t_name}"
                     progress.setdefault(key, {})
                     last_gut = progress[key].get(v_name, -1)
-                    if last_gut >= 20:
+                    if last_gut >= 9:
                         safe_print(f"[VILLAGE {v_name}] Already complete (last_gut={last_gut}), skipping")
                         continue
                         
@@ -2020,7 +2020,7 @@ def run_scraper_for_year(year, window_position):
                                            [opt[0] for opt in get_dropdown_options_safe(driver, "ddlvillage")])
                         continue
                     
-                    for gut_no in range(max(1, int(last_gut) + 1), 21):
+                    for gut_no in range(max(1, int(last_gut) + 1), 10):
                         if os.path.exists(STOP_FILE):
                             break
                         safe_print(f"\n[GUT {gut_no}] Processing gut {gut_no} in village {v_name}")
@@ -2043,7 +2043,7 @@ def run_scraper_for_year(year, window_position):
                         save_progress(progress)
                         
                         # Refresh website and re-enter details for next property (retry with new instance on session death)
-                        if gut_no < 20:
+                        if gut_no < 9:
                             refresh_ok = False
                             for refresh_attempt in range(MAX_SESSION_RETRY):
                                 if not is_browser_alive(driver):
@@ -2074,7 +2074,7 @@ def run_scraper_for_year(year, window_position):
                             if not refresh_ok:
                                 break
                     
-                    progress[key][v_name] = 20
+                    progress[key][v_name] = 9
                     save_progress(progress)
                     safe_print(f"[VILLAGE {v_name}] Processing complete")
                     # Play village completion sound
