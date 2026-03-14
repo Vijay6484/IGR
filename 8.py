@@ -2200,9 +2200,9 @@ def run_years_in_batches(years_to_scrape, max_concurrent):
     print("All scrapers have completed")
 
 def main():
-    """Main function - Years 2026 to 2016 (shared scraper_output)"""
-    years_to_scrape = [str(year) for year in range(2026, 2015, -1)]
-    print(f"[5.py] Scraping years: {years_to_scrape[0]} to {years_to_scrape[-1]}")
+    """Main function - Years 1995 to 1985 (shared scraper_output)"""
+    years_to_scrape = [str(year) for year in range(1995, 1984, -1)]
+    print(f"[8.py] Scraping years: {years_to_scrape[0]} to {years_to_scrape[-1]}")
     
     run_years_in_batches(years_to_scrape, MAX_CONCURRENT_PROCESSES)
 
