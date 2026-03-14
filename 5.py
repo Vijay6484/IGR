@@ -1357,6 +1357,42 @@ def run_scraper_for_year(year, window_position):
         safe_print(f"[NAVIGATE FAIL] Failed to reach page {target_page} after {max_attempts} attempts")
         return False
     
+    def click_next_page_button(driver, wait):
+        """Click the Next/>> button to go to next page. Returns True if clicked, False if no next page."""
+        try:
+            pagination_xpath = "//*[@id='RegistrationGrid']/tbody/tr[last()]/td/table"
+            pagination = driver.find_elements(By.XPATH, pagination_xpath)
+            if not pagination:
+                return False
+            
+            # Common Next button patterns: Next, >, >> (ASP.NET GridView style)
+            next_selectors = [
+                ".//a[normalize-space()='Next' and not(contains(@class, 'disabled'))]",
+                ".//a[normalize-space()='>' and not(contains(@class, 'disabled'))]",
+                ".//a[normalize-space()='>>' and not(contains(@class, 'disabled'))]",
+                ".//a[contains(translate(normalize-space(), 'NEXT', 'next'), 'next') and not(contains(@class, 'disabled'))]",
+            ]
+            for selector in next_selectors:
+                try:
+                    next_links = pagination[0].find_elements(By.XPATH, selector)
+                    for link in next_links:
+                        if link.is_displayed() and link.is_enabled():
+                            prev_page = get_active_page_label(driver)
+                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
+                            time.sleep(0.5)
+                            link.click()
+                            time.sleep(2)
+                            new_page = get_active_page_label(driver)
+                            if new_page != prev_page or int(new_page) > int(prev_page):
+                                safe_print(f"[PAGINATION] Clicked Next: page {prev_page} -> {new_page}")
+                                return True
+                except Exception:
+                    continue
+            return False
+        except Exception as e:
+            safe_print(f"[PAGINATION] Next button click failed: {e}")
+            return False
+    
     def restart_and_resume(driver, wait, meta, target_page, retry_count=0):
         """Restart browser session and resume from specific page"""
         if os.path.exists(STOP_FILE):
@@ -1720,21 +1756,29 @@ def run_scraper_for_year(year, window_position):
                 safe_print("[STOP] Stop file detected, stopping pagination")
                 break
                 
-            # Try to navigate to the next page
+            # Try to navigate to the next page (page number first, then Next button)
             next_page = current_page + 1
             safe_print(f"[PAGINATION] Attempting to navigate to page {next_page}")
             
-            # Use the go_to_page function for navigation
-            if not go_to_page(driver, wait, str(next_page), meta):
-                safe_print(f"[PAGINATION] Could not navigate to page {next_page}, stopping pagination")
-                break
-                
-            # Update current page
-            current_page = next_page
+            navigated = go_to_page(driver, wait, str(next_page), meta)
+            if not navigated:
+                safe_print(f"[PAGINATION] Page number nav failed, trying Next button...")
+                navigated = click_next_page_button(driver, wait)
             
-            # Validate we're on the correct page
+            if navigated:
+                time.sleep(2)  # Allow page to load after navigation
+            
+            if not navigated:
+                safe_print(f"[PAGINATION] No more pages (reached end of pagination)")
+                break
+            
+            # Get actual page after navigation (Next button may not land on exact next_page)
+            actual_page = get_active_page_label(driver)
+            current_page = int(actual_page) if actual_page.isdigit() else next_page
+            
+            # Validate we have content on the new page
             if not validate_page_content(driver, str(current_page)):
-                safe_print(f"[PAGINATION] Page validation failed for page {current_page}")
+                safe_print(f"[PAGINATION] Page {current_page} has no IndexII content, stopping")
                 break
         
         safe_print(f"[SCRAPE COMPLETE] Gut {meta['property_no']}: {current_page} pages processed, {total_saved} records saved")
