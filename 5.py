@@ -34,10 +34,7 @@ from selenium.common.exceptions import (
 )
 from webdriver_manager.chrome import ChromeDriverManager
 
-# CAPTCHA API configuration
-CAPTCHA_API_KEY = "CAP-75F09498C5E101DFDD1983D60827629D199BAD3721A5D3573A1423EB6EA6DF6B"
-CAPTCHA_API_URL = "https://api.capsolver.com/createTask"
-CAPTCHA_RESULT_URL = "https://api.capsolver.com/getTaskResult"
+from captcha_config import CAPTCHA_API_KEY, CAPTCHA_API_URL, CAPTCHA_RESULT_URL, MAX_CAPTCHA_WAIT
 
 # Global constants
 BUTTON_CLICK_TIMEOUT = 60
@@ -46,7 +43,6 @@ SESSION_CHECK_INTERVAL = 60
 MAX_PAGES_PER_GUT = 10000
 MAX_SESSION_RETRY = 5
 WEBSITE_URL = "https://freesearchigrservice.maharashtra.gov.in"
-MAX_CAPTCHA_WAIT = 80
 
 # List of proxies to dynamically rotate IPs. Format: 'http://user:pass@ip:port' or 'http://ip:port'
 # Example: PROXIES = ["http://12.34.56.78:8080", "http://98.76.54.32:80"]
