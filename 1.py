@@ -2264,12 +2264,30 @@ def run_years_in_batches(years_to_scrape, max_concurrent):
     
     print("All scrapers have completed")
 
-def main():
-    """Main function - Years 2005 to 1996 (shared scraper_output)"""
-    years_to_scrape = [str(year) for year in range(2005, 1995, -1)]
-    print(f"[7.py] Scraping years: {years_to_scrape[0]} to {years_to_scrape[-1]}")
+def main(argv=None):
+    """
+    Main entry point - scrape a single year.
     
-    run_years_in_batches(years_to_scrape, MAX_CONCURRENT_PROCESSES)
+    Usage:
+        python 1.py 2026
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv:
+        print("Usage: python 1.py <year>")
+        sys.exit(1)
+
+    year = str(argv[0]).strip()
+    if not year.isdigit() or len(year) != 4:
+        print(f"Invalid year '{year}'. Please provide a 4-digit year, e.g. 2026.")
+        sys.exit(1)
+
+    years_to_scrape = [year]
+    print(f"[1.py] Scraping year: {year}")
+
+    # For a single year, there is no benefit in running multiple concurrent processes
+    run_years_in_batches(years_to_scrape, 1)
 
 if __name__ == "__main__":
     main()
