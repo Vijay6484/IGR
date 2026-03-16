@@ -39,7 +39,7 @@ for YEAR in "${YEARS[@]}"; do
   echo "Creating tmux session ${SESSION_NAME} for year ${YEAR}..."
 
   if [ -n "${VENV_ACTIVATE}" ]; then
-    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python run_year.py ${YEAR}"
+    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python3 run_year.py ${YEAR}"
   else
     tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && python3 run_year.py ${YEAR}"
   fi
