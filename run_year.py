@@ -23,7 +23,11 @@ def run_scraper_for_year(year: str) -> int:
     cmd = [sys.executable, script_path, year]
     print(f"Running: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd)
+    # Ensure VPS mode is enabled for the scraper process
+    env = os.environ.copy()
+    env["VPS_MODE"] = "1"
+
+    result = subprocess.run(cmd, env=env)
     return result.returncode
 
 
