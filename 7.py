@@ -186,6 +186,7 @@ def init_year_directories(year):
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
     
+    RESUME_STATE_FILE = os.path.join(CURRENT_DIR, "scraper_output", "resume_state.json")
     return {
         "OUTPUT_DIR": OUTPUT_DIR,
         "SCREENSHOT_DIR": SCREENSHOT_DIR,
@@ -199,7 +200,8 @@ def init_year_directories(year):
         "JSON_LOG_FILE": os.path.join(LOG_DIR, "scraper.json"),
         "CAPTCHA_IMAGE_PATH": os.path.join(SCREENSHOT_DIR, "captcha_image.png"),
         "VILLAGE_MISMATCH_FILE": os.path.join(LOG_DIR, "village_mismatch.json"),
-        "SEEN_DOCS_FILE": os.path.join(LOG_DIR, "seen_docs.txt")
+        "SEEN_DOCS_FILE": os.path.join(LOG_DIR, "seen_docs.txt"),
+        "RESUME_STATE_FILE": RESUME_STATE_FILE,
     }
 
 def setup_logger(log_file, year):
@@ -335,6 +337,7 @@ def run_scraper_for_year(year, window_position):
     CAPTCHA_IMAGE_PATH = paths["CAPTCHA_IMAGE_PATH"]
     VILLAGE_MISMATCH_FILE = paths["VILLAGE_MISMATCH_FILE"]
     SEEN_DOCS_FILE = paths.get("SEEN_DOCS_FILE", os.path.join(LOG_DIR, "seen_docs.txt"))
+    RESUME_STATE_FILE = paths.get("RESUME_STATE_FILE", os.path.join(os.getcwd(), "scraper_output", "resume_state.json"))
     
     # Create year-specific safe_print function
     safe_print = make_safe_print(year)
@@ -446,6 +449,38 @@ def run_scraper_for_year(year, window_position):
                 json.dump(progress, f, ensure_ascii=False, indent=2)
         except Exception as e:
             safe_print(f"[ERROR] Progress save failed: {e}")
+    
+    def save_resume_state(y, d_name, d_val, t_name, t_val, v_name, v_val, property_no, page):
+        """Save current position so script can resume from here after restart (year, district, tahsil, village, property, page)."""
+        try:
+            state = {
+                "year": str(y),
+                "district_name": d_name,
+                "district_value": str(d_val),
+                "tahsil_name": t_name,
+                "tahsil_value": str(t_val),
+                "village_name": v_name,
+                "village_value": str(v_val),
+                "property_no": int(property_no),
+                "page": int(page),
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            os.makedirs(os.path.dirname(RESUME_STATE_FILE), exist_ok=True)
+            with open(RESUME_STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            safe_print(f"[ERROR] Resume state save failed: {e}")
+    
+    def load_resume_state():
+        """Load last saved position. Returns None if no state or not for this year."""
+        if not os.path.exists(RESUME_STATE_FILE):
+            return None
+        try:
+            with open(RESUME_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            safe_print(f"[WARN] Could not load resume state: {e}")
+            return None
     
     def log_failed(y, d, t, v, g, page=None):
         try:
@@ -1741,14 +1776,23 @@ def run_scraper_for_year(year, window_position):
             safe_print("[SINGLE PAGE] No IndexII buttons found within timeout")
             return 0
     
-    def process_paginated_data(driver, wait, meta, suffix):
+    def process_paginated_data(driver, wait, meta, suffix, resume_from_page=1):
         total_saved = 0
         current_page = 1
         max_pages = 1000
         
-        # Get the initial page number
-        current_page_label = get_active_page_label(driver)
-        safe_print(f"[PAGINATION] Starting on page {current_page_label}")
+        if resume_from_page > 1:
+            safe_print(f"[PAGINATION] Resuming from page {resume_from_page}")
+            if go_to_page(driver, wait, str(resume_from_page), meta):
+                current_page = resume_from_page
+                time.sleep(2)
+            else:
+                safe_print(f"[PAGINATION] Could not navigate to resume page {resume_from_page}, starting from 1")
+        
+        # Get the initial page number if not resuming
+        if current_page == 1:
+            current_page_label = get_active_page_label(driver)
+            safe_print(f"[PAGINATION] Starting on page {current_page_label}")
         
         while current_page <= max_pages:
             safe_print(f"[PAGE {current_page}] Processing page {current_page}")
@@ -1767,6 +1811,8 @@ def run_scraper_for_year(year, window_position):
             saved_count = process_indexii_buttons(driver, wait, buttons, meta, str(current_page), suffix)
             total_saved += saved_count
             safe_print(f"[PAGE {current_page}] Completed - saved {saved_count} records")
+            
+            save_resume_state(meta['year'], meta['district'], meta['d_val'], meta['tahsil'], meta['t_val'], meta['village'], meta['v_val'], int(meta['property_no']), current_page)
             
             # Check if we should stop
             if os.path.exists(STOP_FILE):
@@ -1815,7 +1861,7 @@ def run_scraper_for_year(year, window_position):
         safe_print(f"[SCRAPE COMPLETE] Gut {meta['property_no']}: {current_page} pages processed, {total_saved} records saved")
         return total_saved
     
-    def scrape_all_pages_for_gut(driver, wait, meta, suffix):
+    def scrape_all_pages_for_gut(driver, wait, meta, suffix, resume_from_page=1):
         safe_print(f"[SCRAPE] Starting comprehensive scraping for gut {meta['property_no']}")
         
         try:
@@ -1826,12 +1872,12 @@ def run_scraper_for_year(year, window_position):
                 return process_single_page_data(driver, wait, meta, suffix)
             
             # Process with pagination
-            return process_paginated_data(driver, wait, meta, suffix)
+            return process_paginated_data(driver, wait, meta, suffix, resume_from_page)
         except Exception as e:
             safe_print(f"[SCRAPE ERROR] Error in scraping: {e}")
             return 0
     
-    def process_gut_with_recovery(driver, wait, meta, suffix):
+    def process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page=1):
         gut_no = meta['property_no']
         for attempt in range(1, MAX_SESSION_RETRY + 1):
             try:
@@ -1907,7 +1953,7 @@ def run_scraper_for_year(year, window_position):
                 safe_print(f"[GUT {gut_no}] Search result: {result_status}")
                 
                 if result_status == "HAS_DATA":
-                    saved_count = scrape_all_pages_for_gut(driver, wait, meta, suffix)
+                    saved_count = scrape_all_pages_for_gut(driver, wait, meta, suffix, resume_from_page)
                     safe_print(f"[GUT {gut_no}] Successfully scraped {saved_count} records")
                     log_message("INFO", "SUCCESS", f"Scraped {saved_count} records for gut {gut_no}", meta)
                     global_counter["total_records"] += saved_count
@@ -1946,6 +1992,12 @@ def run_scraper_for_year(year, window_position):
     html_count = 0
     suffix = str(int(time.time() * 1000))
     
+    resume_from = load_resume_state()
+    if resume_from and resume_from.get("year") != year:
+        resume_from = None
+    if resume_from:
+        safe_print(f"[RESUME] Checkpoint found: year={resume_from.get('year')} district={resume_from.get('district_name')} tahsil={resume_from.get('tahsil_name')} village={resume_from.get('village_name')} property={resume_from.get('property_no')} page={resume_from.get('page')}")
+    
     safe_print("=== MILITARY GRADE WEB SCRAPER STARTED ===")
     if VPS_MODE:
         safe_print("[INFO] VPS mode: headless, no GUI required")
@@ -1970,6 +2022,9 @@ def run_scraper_for_year(year, window_position):
         for d_name, d_val in district_options:
             if os.path.exists(STOP_FILE):
                 break
+            if resume_from and d_name != resume_from.get("district_name"):
+                safe_print(f"[RESUME] Skipping district {d_name} (resume at {resume_from.get('district_name')})")
+                continue
             safe_print(f"\n[DISTRICT] Processing {d_name}")
             
             if not select_dropdown_safe(driver, "ddlDistrict1", d_val):
@@ -1986,6 +2041,9 @@ def run_scraper_for_year(year, window_position):
             for t_name, t_val in tahsil_options:
                 if os.path.exists(STOP_FILE):
                     break
+                if resume_from and (d_name != resume_from.get("district_name") or t_name != resume_from.get("tahsil_name")):
+                    safe_print(f"[RESUME] Skipping tahsil {t_name}")
+                    continue
                 safe_print(f"[TAHSIL] Processing {t_name}")
                 
                 if not select_dropdown_safe(driver, "ddltahsil", t_val):
@@ -2001,15 +2059,22 @@ def run_scraper_for_year(year, window_position):
                 for v_name, v_val in village_options:
                     if os.path.exists(STOP_FILE):
                         break
+                    if resume_from and (d_name != resume_from.get("district_name") or t_name != resume_from.get("tahsil_name") or v_name != resume_from.get("village_name")):
+                        safe_print(f"[RESUME] Skipping village {v_name}")
+                        continue
                     safe_print(f"[VILLAGE] Processing {v_name}")
                     
                     key = f"{year}|{d_name}|{t_name}"
                     progress.setdefault(key, {})
                     last_gut = progress[key].get(v_name, -1)
+                    if resume_from and d_name == resume_from.get("district_name") and t_name == resume_from.get("tahsil_name") and v_name == resume_from.get("village_name"):
+                        last_gut = max(int(last_gut), resume_from.get("property_no", 1) - 1)
+                        safe_print(f"[RESUME] Starting from property {last_gut + 1} (checkpoint was property {resume_from.get('property_no')} page {resume_from.get('page')})")
                     if last_gut >= 9:
                         safe_print(f"[VILLAGE {v_name}] Already complete (last_gut={last_gut}), skipping")
                         continue
                         
+                    save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, 1, 1)
                     if not select_dropdown_safe(driver, "ddlvillage", v_val):
                         safe_print(f"[ERROR] Failed to select village {v_name}, skipping")
                         log_village_mismatch(d_name, t_name, v_name, 
@@ -2019,6 +2084,10 @@ def run_scraper_for_year(year, window_position):
                     for gut_no in range(max(1, int(last_gut) + 1), 10):
                         if os.path.exists(STOP_FILE):
                             break
+                        save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, gut_no, 1)
+                        resume_from_page = (resume_from and d_name == resume_from.get("district_name") and t_name == resume_from.get("tahsil_name") and v_name == resume_from.get("village_name") and gut_no == resume_from.get("property_no")) and (resume_from.get("page", 0) + 1) or 1
+                        if resume_from_page > 1:
+                            safe_print(f"[RESUME] Will resume gut {gut_no} from page {resume_from_page}")
                         safe_print(f"\n[GUT {gut_no}] Processing gut {gut_no} in village {v_name}")
                         
                         meta = {
@@ -2033,7 +2102,7 @@ def run_scraper_for_year(year, window_position):
                             'seen_docs_dict': seen_docs_dict
                         }
                         
-                        saved_count = process_gut_with_recovery(driver, wait, meta, suffix)
+                        saved_count = process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page)
                         html_count += saved_count
                         progress[key][v_name] = gut_no
                         save_progress(progress)
