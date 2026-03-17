@@ -2245,6 +2245,7 @@ def run_scraper_for_year(year, window_position):
     
     def process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page=1):
         gut_no = meta['property_no']
+        retried_no_load = False
         for attempt in range(1, MAX_SESSION_RETRY + 1):
             try:
                 safe_print(f"[GUT {gut_no}] Processing gut {gut_no} (attempt {attempt}/{MAX_SESSION_RETRY})")
@@ -2327,6 +2328,21 @@ def run_scraper_for_year(year, window_position):
                 elif result_status == "NO_RECORDS":
                     safe_print(f"[GUT {gut_no}] No records found")
                     log_message("INFO", "NO_RECORDS", f"No records found for gut {gut_no}", meta)
+                    return 0
+                elif result_status == "NO_LOAD":
+                    # If the results grid didn't load after captcha, refresh and retry THIS gut once.
+                    if not retried_no_load:
+                        retried_no_load = True
+                        safe_print(f"[GUT {gut_no}] NO_LOAD after captcha; refreshing and retrying same gut once...")
+                        try:
+                            terminate_driver_safely(driver)
+                        except Exception:
+                            pass
+                        driver, wait = safe_browser_restart()
+                        continue
+                    safe_print(f"[GUT {gut_no}] NO_LOAD persisted after retry; marking as failed/special")
+                    log_failed(meta['year'], meta['district'], meta['tahsil'], meta['village'], gut_no)
+                    log_message("WARN", "NO_LOAD", f"NO_LOAD persisted for gut {gut_no} after one refresh retry", meta)
                     return 0
                 else:
                     safe_print(f"[GUT {gut_no}] Special case: {result_status}")
