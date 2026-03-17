@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+
+# Google OAuth token cache
+token.json
+
+# Common credential file names (do not commit secrets)
+credentials.json
+client_secret.json
+service_account.json

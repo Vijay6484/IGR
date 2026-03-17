@@ -21,6 +21,7 @@ import signal
 import psutil
 import logging
 import random
+import mimetypes
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -35,6 +36,255 @@ from selenium.common.exceptions import (
 from webdriver_manager.chrome import ChromeDriverManager
 
 from captcha_config import CAPTCHA_API_KEY, CAPTCHA_API_URL, CAPTCHA_RESULT_URL, MAX_CAPTCHA_WAIT
+from local_captcha_solver import solve_captcha_with_tesseract_from_driver
+
+# Load environment variables from .env (if present)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+# Optional: Drive-only mode (no persistent local scraper_output).
+# If DRIVE_ONLY is not set, default to 1 on Linux (VPS) and 0 otherwise.
+_drive_only_env = os.environ.get("DRIVE_ONLY", "").strip().lower()
+if _drive_only_env in ("1", "true", "yes", "on"):
+    DRIVE_ONLY = True
+elif _drive_only_env in ("0", "false", "no", "off"):
+    DRIVE_ONLY = False
+else:
+    DRIVE_ONLY = (platform.system() == "Linux")
+
+# ---- Google Drive uploader (optional) ----------------------------------------
+class GoogleDriveUploader:
+    """
+    Mirrors local files under ./scraper_output into Google Drive with the same
+    relative path (folders + filename).
+    """
+
+    def __init__(self, safe_print=None):
+        self.safe_print = safe_print or (lambda *a, **k: None)
+        self.enabled = os.environ.get("GDRIVE_UPLOAD_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        self.upload_on_save = os.environ.get("GDRIVE_UPLOAD_ON_SAVE", "1").strip().lower() in ("1", "true", "yes", "on")
+        self.auth_mode = os.environ.get("GDRIVE_AUTH_MODE", "service_account").strip().lower()
+        self.root_folder_id = os.environ.get("GDRIVE_ROOT_FOLDER_ID", "").strip() or None
+        self.root_folder_name = os.environ.get("GDRIVE_ROOT_FOLDER_NAME", "scraper_output").strip() or "scraper_output"
+        self.shared_drive_id = os.environ.get("GDRIVE_SHARED_DRIVE_ID", "").strip() or None
+
+        self._service = None
+        self._folder_cache = {}  # (parent_id, name) -> folder_id
+
+    def _build_service(self):
+        if self._service is not None:
+            return self._service
+
+        if not self.enabled:
+            return None
+
+        try:
+            from googleapiclient.discovery import build
+        except Exception as e:
+            raise RuntimeError(f"google-api-python-client not installed: {e}")
+
+        scopes = ["https://www.googleapis.com/auth/drive"]
+
+        if self.auth_mode == "service_account":
+            from google.oauth2 import service_account
+            sa_file = os.environ.get("GDRIVE_SERVICE_ACCOUNT_FILE", "").strip()
+            if not sa_file:
+                raise RuntimeError("GDRIVE_SERVICE_ACCOUNT_FILE is required for service_account auth")
+            creds = service_account.Credentials.from_service_account_file(sa_file, scopes=scopes)
+        elif self.auth_mode == "oauth":
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+
+            token_file = os.environ.get("GDRIVE_OAUTH_TOKEN_FILE", "token.json").strip() or "token.json"
+            client_id = os.environ.get("GDRIVE_OAUTH_CLIENT_ID", "").strip()
+            client_secret = os.environ.get("GDRIVE_OAUTH_CLIENT_SECRET", "").strip()
+            secrets_file = os.environ.get("GDRIVE_OAUTH_CLIENT_SECRETS_FILE", "").strip()
+
+            if client_id and client_secret:
+                client_config = {
+                    "installed": {
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": ["http://localhost"],
+                    }
+                }
+                flow_factory = lambda scopes: InstalledAppFlow.from_client_config(client_config, scopes)
+            elif secrets_file:
+                flow_factory = lambda scopes: InstalledAppFlow.from_client_secrets_file(secrets_file, scopes)
+            else:
+                raise RuntimeError(
+                    "OAuth requires either GDRIVE_OAUTH_CLIENT_ID + GDRIVE_OAUTH_CLIENT_SECRET in .env, "
+                    "or GDRIVE_OAUTH_CLIENT_SECRETS_FILE path to a JSON file."
+                )
+
+            creds = None
+            if os.path.exists(token_file):
+                try:
+                    creds = Credentials.from_authorized_user_file(token_file, scopes=scopes)
+                except Exception:
+                    creds = None
+
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    flow = flow_factory(scopes)
+                    creds = flow.run_local_server(port=0)
+                try:
+                    with open(token_file, "w", encoding="utf-8") as f:
+                        f.write(creds.to_json())
+                except Exception as e:
+                    self.safe_print(f"[GDRIVE] WARN: Could not write token file: {e}")
+        else:
+            raise RuntimeError(f"Unknown GDRIVE_AUTH_MODE='{self.auth_mode}' (use service_account or oauth)")
+
+        self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        return self._service
+
+    def _drive_kwargs(self):
+        # Required for Shared Drives; harmless otherwise.
+        return {"supportsAllDrives": True}
+
+    def _list_kwargs(self):
+        kw = {"supportsAllDrives": True, "includeItemsFromAllDrives": True}
+        if self.shared_drive_id:
+            kw.update({"corpora": "drive", "driveId": self.shared_drive_id})
+        return kw
+
+    def _ensure_root_folder(self):
+        svc = self._build_service()
+        if svc is None:
+            return None
+
+        if self.root_folder_id:
+            return self.root_folder_id
+
+        # Service accounts have no storage quota; they must use a Shared Drive.
+        if self.auth_mode == "service_account" and not self.shared_drive_id:
+            raise RuntimeError(
+                "[GDRIVE] Service accounts cannot upload to My Drive (no storage quota). "
+                "Create a Shared Drive in Google Drive, add your service account email as a member (Content manager or Writer), "
+                "then set GDRIVE_SHARED_DRIVE_ID to the Shared Drive ID and either GDRIVE_ROOT_FOLDER_ID to a folder inside it, "
+                "or leave GDRIVE_ROOT_FOLDER_ID empty to use GDRIVE_ROOT_FOLDER_NAME inside that Shared Drive. "
+                "See .env.example for details."
+            )
+
+        # Use Shared Drive root as parent when GDRIVE_SHARED_DRIVE_ID is set.
+        parent_for_root = self.shared_drive_id if self.shared_drive_id else "root"
+        q = (
+            f"mimeType='application/vnd.google-apps.folder' and "
+            f"name='{self._escape_query(self.root_folder_name)}' and "
+            f"'{parent_for_root}' in parents and trashed=false"
+        )
+        resp = svc.files().list(q=q, fields="files(id,name)", pageSize=10, **self._list_kwargs()).execute()
+        files = resp.get("files", [])
+        if files:
+            self.root_folder_id = files[0]["id"]
+            return self.root_folder_id
+
+        folder_meta = {"name": self.root_folder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_for_root]}
+        created = svc.files().create(body=folder_meta, fields="id", **self._drive_kwargs()).execute()
+        self.root_folder_id = created["id"]
+        return self.root_folder_id
+
+    @staticmethod
+    def _escape_query(s: str) -> str:
+        # Drive query strings are single-quoted; escape embedded single quotes.
+        return (s or "").replace("'", "\\'")
+
+    def get_or_create_folder(self, parent_id: str, name: str) -> str:
+        svc = self._build_service()
+        if svc is None:
+            raise RuntimeError("Drive service not available")
+
+        key = (parent_id, name)
+        if key in self._folder_cache:
+            return self._folder_cache[key]
+
+        q = (
+            f"mimeType='application/vnd.google-apps.folder' and "
+            f"name='{self._escape_query(name)}' and "
+            f"'{parent_id}' in parents and trashed=false"
+        )
+        resp = svc.files().list(q=q, fields="files(id,name)", pageSize=10, **self._list_kwargs()).execute()
+        files = resp.get("files", [])
+        if files:
+            folder_id = files[0]["id"]
+            self._folder_cache[key] = folder_id
+            return folder_id
+
+        folder_meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
+        created = svc.files().create(body=folder_meta, fields="id", **self._drive_kwargs()).execute()
+        folder_id = created["id"]
+        self._folder_cache[key] = folder_id
+        return folder_id
+
+    def ensure_drive_path(self, path_parts):
+        root_id = self._ensure_root_folder()
+        current = root_id
+        for part in path_parts:
+            if not part:
+                continue
+            current = self.get_or_create_folder(current, part)
+        return current
+
+    def upload_file_to_folder(self, local_path: str, folder_id: str, drive_name: str | None = None):
+        svc = self._build_service()
+        if svc is None:
+            return None
+
+        from googleapiclient.http import MediaFileUpload
+
+        drive_name = drive_name or os.path.basename(local_path)
+        mime, _ = mimetypes.guess_type(local_path)
+        mime = mime or "application/octet-stream"
+
+        media = MediaFileUpload(local_path, mimetype=mime, resumable=True)
+        body = {"name": drive_name, "parents": [folder_id]}
+        created = svc.files().create(body=body, media_body=media, fields="id", **self._drive_kwargs()).execute()
+        return created.get("id")
+
+    def mirror_upload(self, local_path: str, base_local_dir: str):
+        """
+        Upload local_path into Drive at: <root>/<rel_dir>/<filename>,
+        where rel_dir is relative to base_local_dir.
+        """
+        if not self.enabled:
+            return None
+
+        if not os.path.exists(local_path) or not os.path.isfile(local_path):
+            return None
+
+        rel = os.path.relpath(local_path, base_local_dir)
+        rel_parts = rel.split(os.sep)
+        folder_parts = rel_parts[:-1]
+        filename = rel_parts[-1]
+
+        try:
+            folder_id = self.ensure_drive_path(folder_parts)
+            return self.upload_file_to_folder(local_path, folder_id, filename)
+        except Exception as e:
+            self.safe_print(f"[GDRIVE] Upload failed for {rel}: {e}")
+            return None
+
+    def sync_directory(self, local_dir: str, base_local_dir: str):
+        """Walk a directory and mirror-upload all files found."""
+        if not self.enabled:
+            return 0
+        uploaded = 0
+        for root, _, files in os.walk(local_dir):
+            for fn in files:
+                p = os.path.join(root, fn)
+                fid = self.mirror_upload(p, base_local_dir)
+                if fid:
+                    uploaded += 1
+        return uploaded
 
 # Global constants
 BUTTON_CLICK_TIMEOUT = 60
@@ -51,13 +301,16 @@ PROXIES = [] # Keep empty to run without proxy
 # Set HEADLESS_MODE to True to enable headless operation (no visible browser)
 HEADLESS_MODE = False
 
-# VPS_MODE: Set to True to force VPS/server mode (no GUI). When True: headless browser,
-# Chrome/Chromium on Linux, no sounds. Auto-enabled when: (1) VPS_MODE=1 env var, or
-# (2) Linux with no DISPLAY. To force on Mac: set VPS_MODE = True below or VPS_MODE=1.
-VPS_MODE = (
-    os.environ.get("VPS_MODE", "").lower() in ("1", "true", "yes") or
-    (platform.system() == "Linux" and not os.environ.get("DISPLAY", "").strip())
-)
+# VPS_MODE: When True: headless browser, Linux Chrome/Chromium, no sounds.
+# - If VPS_MODE env var is set, it wins.
+# - Otherwise, default to VPS mode on Linux (typical VPS).
+_vps_env = os.environ.get("VPS_MODE", "").lower().strip()
+if _vps_env in ("1", "true", "yes", "on"):
+    VPS_MODE = True
+elif _vps_env in ("0", "false", "no", "off"):
+    VPS_MODE = False
+else:
+    VPS_MODE = (platform.system() == "Linux")
 # VPS mode forces headless (no browser window)
 if VPS_MODE:
     HEADLESS_MODE = True
@@ -181,10 +434,11 @@ def init_year_directories(year):
     SCREENSHOT_DIR = os.path.join(OUTPUT_DIR, "screenshots")
     LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
     
-    # Create directories
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
+    # Create directories only when not in Drive-only mode
+    if not DRIVE_ONLY:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        os.makedirs(LOG_DIR, exist_ok=True)
     
     RESUME_STATE_FILE = os.path.join(CURRENT_DIR, "scraper_output", "resume_state.json")
     return {
@@ -320,7 +574,7 @@ def run_scraper_for_year(year, window_position):
     except ImportError:
         pass
     
-    # Initialize year-specific paths
+    # Initialize year-specific paths (local paths are only created when not DRIVE_ONLY)
     paths = init_year_directories(year)
     
     # Extract paths for easier access
@@ -341,6 +595,43 @@ def run_scraper_for_year(year, window_position):
     
     # Create year-specific safe_print function
     safe_print = make_safe_print(year)
+
+    # Optional: restrict processing to a specific village index within each tahsil.
+    # If ONLY_VILLAGE_INDEX is set in the environment (1-based index), only that
+    # village will be processed for each tahsil. If unset or invalid, all villages run.
+    try:
+        ONLY_VILLAGE_INDEX = int(os.environ.get("ONLY_VILLAGE_INDEX", "").strip() or "0")
+    except ValueError:
+        ONLY_VILLAGE_INDEX = 0
+
+    # Google Drive uploader (optional)
+    drive_uploader = None
+    try:
+        drive_uploader = GoogleDriveUploader(safe_print=safe_print)
+        if not drive_uploader.enabled:
+            drive_uploader = None
+        else:
+            safe_print("[GDRIVE] Upload enabled")
+    except Exception as e:
+        safe_print(f"[GDRIVE] Disabled (init failed): {e}")
+        drive_uploader = None
+
+    # Drive-backed storage (used when DRIVE_ONLY and Drive is enabled)
+    drive_storage = None
+    drive_root_id = None
+    if drive_uploader:
+        try:
+            from drive_storage import DriveStorage
+            drive_root_id = drive_uploader._ensure_root_folder()
+            drive_storage = DriveStorage(
+                service=drive_uploader._build_service(),
+                root_folder_id=drive_root_id,
+                safe_print=safe_print,
+                supports_all_drives=True,
+            )
+        except Exception as e:
+            safe_print(f"[GDRIVE] Storage init failed: {e}")
+            drive_storage = None
     
     # Initialize variables
     global_counter = {"total_records": 0, "total_pages": 0}
@@ -353,8 +644,9 @@ def run_scraper_for_year(year, window_position):
     if LOGGING_TYPE == "LOGGING":
         logger = setup_logger(LOG_FILE, year)
     
-    # Clean up old logs
-    cleanup_old_logs(LOG_DIR, LOG_RETENTION_DAYS)
+    # Clean up old logs (local-only)
+    if not DRIVE_ONLY:
+        cleanup_old_logs(LOG_DIR, LOG_RETENTION_DAYS)
     
     # Play alert sounds (no-op in VPS/headless mode - no audio output)
     def play_alert_sound():
@@ -420,12 +712,18 @@ def run_scraper_for_year(year, window_position):
     # Save and load functions
     def save_run_status():
         try:
-            with open(RUN_STATUS_FILE, "w", encoding="utf-8") as f:
-                json.dump(RUN_STATUS, f, ensure_ascii=False, indent=2)
+            if DRIVE_ONLY and drive_storage:
+                drive_storage.write_json([str(year), "logs"], "run_status.json", RUN_STATUS)
+            else:
+                with open(RUN_STATUS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(RUN_STATUS, f, ensure_ascii=False, indent=2)
         except Exception as e:
             safe_print(f"[ERROR] Failed to save run status: {e}")
     
     def load_run_status():
+        if DRIVE_ONLY and drive_storage:
+            data = drive_storage.read_json([str(year), "logs"], "run_status.json")
+            return data if isinstance(data, dict) else {}
         if os.path.exists(RUN_STATUS_FILE):
             try:
                 with open(RUN_STATUS_FILE, "r", encoding="utf-8") as f:
@@ -435,6 +733,9 @@ def run_scraper_for_year(year, window_position):
         return {}
     
     def load_progress():
+        if DRIVE_ONLY and drive_storage:
+            data = drive_storage.read_json([str(year), "logs"], "progress.json")
+            return data if isinstance(data, dict) else {}
         if os.path.exists(PROGRESS_FILE):
             try:
                 with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
@@ -445,8 +746,11 @@ def run_scraper_for_year(year, window_position):
     
     def save_progress(progress):
         try:
-            with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-                json.dump(progress, f, ensure_ascii=False, indent=2)
+            if DRIVE_ONLY and drive_storage:
+                drive_storage.write_json([str(year), "logs"], "progress.json", progress)
+            else:
+                with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(progress, f, ensure_ascii=False, indent=2)
         except Exception as e:
             safe_print(f"[ERROR] Progress save failed: {e}")
     
@@ -465,14 +769,20 @@ def run_scraper_for_year(year, window_position):
                 "page": int(page),
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
             }
-            os.makedirs(os.path.dirname(RESUME_STATE_FILE), exist_ok=True)
-            with open(RESUME_STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
+            if DRIVE_ONLY and drive_storage:
+                drive_storage.write_json([str(y)], "resume_state.json", state)
+            else:
+                os.makedirs(os.path.dirname(RESUME_STATE_FILE), exist_ok=True)
+                with open(RESUME_STATE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=2)
         except Exception as e:
             safe_print(f"[ERROR] Resume state save failed: {e}")
     
     def load_resume_state():
         """Load last saved position. Returns None if no state or not for this year."""
+        if DRIVE_ONLY and drive_storage:
+            data = drive_storage.read_json([str(year)], "resume_state.json")
+            return data if isinstance(data, dict) else None
         if not os.path.exists(RESUME_STATE_FILE):
             return None
         try:
@@ -484,18 +794,26 @@ def run_scraper_for_year(year, window_position):
     
     def log_failed(y, d, t, v, g, page=None):
         try:
-            with open(FAILED_FILE, "a", encoding="utf-8") as f:
-                data = {"year": y, "district": d, "tahsil": t, "village": v, "gut": g}
-                if page:
-                    data["page"] = page
-                f.write(json.dumps(data, ensure_ascii=False) + "\n")
+            data = {"year": y, "district": d, "tahsil": t, "village": v, "gut": g}
+            if page:
+                data["page"] = page
+            if DRIVE_ONLY and drive_storage:
+                # Write latest failure snapshot (overwrite) to Drive
+                drive_storage.write_json([str(y), "logs"], "failed_last.json", data)
+            else:
+                with open(FAILED_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(data, ensure_ascii=False) + "\n")
         except Exception as e:
             safe_print(f"[ERROR] Failed to log failed attempt: {e}")
     
     def log_special(y, d, t, v, g):
         try:
-            with open(SPECIAL_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"year": y, "district": d, "tahsil": t, "village": v, "gut": g}, ensure_ascii=False) + "\n")
+            data = {"year": y, "district": d, "tahsil": t, "village": v, "gut": g}
+            if DRIVE_ONLY and drive_storage:
+                drive_storage.write_json([str(y), "logs"], "special_last.json", data)
+            else:
+                with open(SPECIAL_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(data, ensure_ascii=False) + "\n")
         except Exception as e:
             safe_print(f"[ERROR] Failed to log special case: {e}")
     
@@ -509,8 +827,11 @@ def run_scraper_for_year(year, window_position):
                 "available_villages": available_villages[:10]
             }
             
-            with open(VILLAGE_MISMATCH_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(mismatch_data, ensure_ascii=False) + "\n")
+            if DRIVE_ONLY and drive_storage:
+                drive_storage.write_json([str(year), "logs"], "village_mismatch_last.json", mismatch_data)
+            else:
+                with open(VILLAGE_MISMATCH_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(mismatch_data, ensure_ascii=False) + "\n")
         except Exception as e:
             safe_print(f"[ERROR] Failed to log village mismatch: {e}")
             
@@ -525,24 +846,38 @@ def run_scraper_for_year(year, window_position):
     def load_seen_docs():
         """Load seen docs: dict of village_hash -> set of HTML content hashes (exact match dedup per village)"""
         seen = {}
-        if os.path.exists(SEEN_DOCS_FILE):
-            try:
-                with open(SEEN_DOCS_FILE, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
+        try:
+            if DRIVE_ONLY and drive_storage:
+                data = drive_storage.read_bytes([str(year), "logs"], "seen_docs.txt")
+                if data:
+                    for raw_line in data.decode("utf-8", errors="ignore").splitlines():
+                        line = raw_line.strip()
                         if line and "|" in line:
-                            parts = line.split("|", 1)
-                            if len(parts) == 2:
-                                v_hash, content_hash = parts
-                                seen.setdefault(v_hash, set()).add(content_hash)
-            except Exception as e:
-                safe_print(f"[ERROR] Failed to load seen docs: {e}")
+                            v_hash, content_hash = line.split("|", 1)
+                            seen.setdefault(v_hash, set()).add(content_hash)
+            else:
+                if os.path.exists(SEEN_DOCS_FILE):
+                    with open(SEEN_DOCS_FILE, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and "|" in line:
+                                parts = line.split("|", 1)
+                                if len(parts) == 2:
+                                    v_hash, content_hash = parts
+                                    seen.setdefault(v_hash, set()).add(content_hash)
+        except Exception as e:
+            safe_print(f"[ERROR] Failed to load seen docs: {e}")
         return seen
 
     def add_seen_doc(village_hash, content_hash):
         try:
-            with open(SEEN_DOCS_FILE, "a", encoding="utf-8") as f:
-                f.write(f"{village_hash}|{content_hash}\n")
+            line = f"{village_hash}|{content_hash}\n"
+            if DRIVE_ONLY and drive_storage:
+                existing = drive_storage.read_bytes([str(year), "logs"], "seen_docs.txt") or b""
+                drive_storage.upsert_bytes([str(year), "logs"], "seen_docs.txt", existing + line.encode("utf-8"), mime="text/plain; charset=utf-8")
+            else:
+                with open(SEEN_DOCS_FILE, "a", encoding="utf-8") as f:
+                    f.write(line)
         except Exception as e:
             safe_print(f"[ERROR] Failed to save seen doc: {e}")
     
@@ -887,14 +1222,10 @@ def run_scraper_for_year(year, window_position):
                     if not is_browser_alive(driver):
                         return False
                         
-                    # Take screenshot of the new captcha
-                    img_elem = driver.find_element(By.ID, "imgCaptcha_new")
-                    img_elem.screenshot(captcha_image_path)
-                    
-                    # Solve captcha with API
-                    possible_solutions = solve_captcha_with_api(captcha_image_path, CAPTCHA_API_KEY)
+                    # Solve captcha locally using Tesseract (no screenshot file needed)
+                    possible_solutions = solve_captcha_with_tesseract_from_driver(driver, img_id="imgCaptcha_new")
                     if possible_solutions is None:
-                        safe_print_func("[CAPTCHA API ERROR] Failed to solve captcha with API")
+                        safe_print_func("[CAPTCHA OCR ERROR] Failed to solve captcha with Tesseract")
                         if attempt < max_attempts:
                             continue
                         return False
@@ -1132,16 +1463,29 @@ def run_scraper_for_year(year, window_position):
                 return False
             
             village_safe = ''.join(c for c in meta['village'] if c.isalnum() or c in (' ', '_', '-')).replace(' ', '_')
-            folder = os.path.join(OUTPUT_DIR, meta['year'], meta['district'], meta['tahsil'], village_safe)
-            os.makedirs(folder, exist_ok=True)
-            
             fn = f"{meta['year']}*{meta['district']}*{meta['tahsil']}*{village_safe}*{meta['property_no']}_p{page}_r{rec}_{suffix}.html"
-            file_path = os.path.join(folder, fn)
-            
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(html)
-            
-            safe_print(f"[SAVED] {fn}")
+            if DRIVE_ONLY and drive_storage:
+                # Drive-only: folders are numeric indices; HTML is uploaded directly (no local persistence).
+                path_parts = [
+                    str(meta["year"]),
+                    str(meta.get("district_idx", "")),
+                    str(meta.get("taluka_idx", "")),
+                    str(meta.get("village_idx", "")),
+                ]
+                drive_storage.create_bytes(path_parts, fn, html.encode("utf-8"), mime="text/html; charset=utf-8")
+                safe_print(f"[SAVED:DRIVE] {fn}")
+            else:
+                folder = os.path.join(OUTPUT_DIR, meta['year'], meta['district'], meta['tahsil'], village_safe)
+                os.makedirs(folder, exist_ok=True)
+                file_path = os.path.join(folder, fn)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                safe_print(f"[SAVED] {fn}")
+
+                # Mirror upload into Google Drive if enabled
+                if drive_uploader and drive_uploader.upload_on_save:
+                    base_local_dir = os.path.join(os.getcwd(), "scraper_output")
+                    drive_uploader.mirror_upload(file_path, base_local_dir)
             return True
             
         except Exception as e:
@@ -1991,6 +2335,73 @@ def run_scraper_for_year(year, window_position):
     seen_docs_dict = load_seen_docs()
     html_count = 0
     suffix = str(int(time.time() * 1000))
+
+    # ---- Per-folder state JSON helpers (Drive-only) --------------------------
+    def _now_ts():
+        return time.strftime('%Y-%m-%d %H:%M:%S')
+
+    def _write_state_json(path_parts, filename, obj):
+        if DRIVE_ONLY and drive_storage:
+            try:
+                drive_storage.write_json(path_parts, filename, obj)
+            except Exception as e:
+                safe_print(f"[GDRIVE] State write failed {path_parts}/{filename}: {e}")
+
+    def mark_year_state(status, current=None, districts=None):
+        obj = {
+            "year": int(year) if str(year).isdigit() else str(year),
+            "status": status,
+            "updatedAt": _now_ts(),
+        }
+        if current:
+            obj["current"] = current
+        if districts is not None:
+            obj["districts"] = districts
+        _write_state_json([str(year)], "year.json", obj)
+
+    def mark_district_state(d_idx, status, current=None, talukas=None):
+        obj = {
+            "year": int(year) if str(year).isdigit() else str(year),
+            "districtIndex": int(d_idx),
+            "status": status,
+            "updatedAt": _now_ts(),
+        }
+        if current:
+            obj["current"] = current
+        if talukas is not None:
+            obj["talukas"] = talukas
+        _write_state_json([str(year), str(d_idx)], "district.json", obj)
+
+    def mark_taluka_state(d_idx, t_idx, status, current=None, villages=None):
+        obj = {
+            "year": int(year) if str(year).isdigit() else str(year),
+            "districtIndex": int(d_idx),
+            "talukaIndex": int(t_idx),
+            "status": status,
+            "updatedAt": _now_ts(),
+        }
+        if current:
+            obj["current"] = current
+        if villages is not None:
+            obj["villages"] = villages
+        _write_state_json([str(year), str(d_idx), str(t_idx)], "taluka.json", obj)
+
+    def mark_village_state(d_idx, t_idx, v_idx, status, lastGutNo=None, lastPage=None, htmlSavedCount=None):
+        obj = {
+            "year": int(year) if str(year).isdigit() else str(year),
+            "districtIndex": int(d_idx),
+            "talukaIndex": int(t_idx),
+            "villageIndex": int(v_idx),
+            "status": status,
+            "updatedAt": _now_ts(),
+        }
+        if lastGutNo is not None:
+            obj["lastGutNo"] = int(lastGutNo)
+        if lastPage is not None:
+            obj["lastPage"] = int(lastPage)
+        if htmlSavedCount is not None:
+            obj["htmlSavedCount"] = int(htmlSavedCount)
+        _write_state_json([str(year), str(d_idx), str(t_idx), str(v_idx)], "village.json", obj)
     
     resume_from = load_resume_state()
     if resume_from and resume_from.get("year") != year:
@@ -2010,6 +2421,9 @@ def run_scraper_for_year(year, window_position):
     driver, wait = safe_browser_restart()
     
     try:
+        # Initialize year.json in Drive-only mode
+        mark_year_state("ongoing", current=None, districts={})
+
         if not safe_get_url(driver, WEBSITE_URL):
             raise RuntimeError("Failed to load website on initial attempt")
             
@@ -2019,13 +2433,17 @@ def run_scraper_for_year(year, window_position):
         district_options = get_dropdown_options_safe(driver, "ddlDistrict1")
         safe_print(f"[INFO] Found {len(district_options)} districts to process")
         
-        for d_name, d_val in district_options:
+        districts_state = {}
+        for d_idx, (d_name, d_val) in enumerate(district_options, start=1):
             if os.path.exists(STOP_FILE):
                 break
             if resume_from and d_name != resume_from.get("district_name"):
                 safe_print(f"[RESUME] Skipping district {d_name} (resume at {resume_from.get('district_name')})")
                 continue
             safe_print(f"\n[DISTRICT] Processing {d_name}")
+            districts_state.setdefault(str(d_idx), {"status": "ongoing", "updatedAt": _now_ts()})
+            mark_year_state("ongoing", current={"districtIndex": d_idx}, districts=districts_state)
+            mark_district_state(d_idx, "ongoing", current=None, talukas={})
             
             if not select_dropdown_safe(driver, "ddlDistrict1", d_val):
                 safe_print(f"[ERROR] Failed to select district {d_name}, skipping")
@@ -2038,13 +2456,17 @@ def run_scraper_for_year(year, window_position):
             tahsil_options = get_dropdown_options_safe(driver, "ddltahsil")
             safe_print(f"[INFO] Found {len(tahsil_options)} tahsils in district {d_name}")
             
-            for t_name, t_val in tahsil_options:
+            talukas_state = {}
+            for t_idx, (t_name, t_val) in enumerate(tahsil_options, start=1):
                 if os.path.exists(STOP_FILE):
                     break
                 if resume_from and (d_name != resume_from.get("district_name") or t_name != resume_from.get("tahsil_name")):
                     safe_print(f"[RESUME] Skipping tahsil {t_name}")
                     continue
                 safe_print(f"[TAHSIL] Processing {t_name}")
+                talukas_state.setdefault(str(t_idx), {"status": "ongoing", "updatedAt": _now_ts()})
+                mark_district_state(d_idx, "ongoing", current={"talukaIndex": t_idx}, talukas=talukas_state)
+                mark_taluka_state(d_idx, t_idx, "ongoing", current=None, villages={})
                 
                 if not select_dropdown_safe(driver, "ddltahsil", t_val):
                     safe_print(f"[ERROR] Failed to select tahsil {t_name}, skipping")
@@ -2056,13 +2478,21 @@ def run_scraper_for_year(year, window_position):
                     continue
                 safe_print(f"[INFO] Found {len(village_options)} villages in tahsil {t_name}")
                 
-                for v_name, v_val in village_options:
+                villages_state = {}
+                for v_idx, (v_name, v_val) in enumerate(village_options, start=1):
+                    if ONLY_VILLAGE_INDEX and v_idx != ONLY_VILLAGE_INDEX:
+                        continue
+                    if ONLY_VILLAGE_INDEX:
+                        safe_print(f"[VILLAGE FILTER] ONLY_VILLAGE_INDEX={ONLY_VILLAGE_INDEX}, processing village #{v_idx}: {v_name}")
                     if os.path.exists(STOP_FILE):
                         break
                     if resume_from and (d_name != resume_from.get("district_name") or t_name != resume_from.get("tahsil_name") or v_name != resume_from.get("village_name")):
                         safe_print(f"[RESUME] Skipping village {v_name}")
                         continue
                     safe_print(f"[VILLAGE] Processing {v_name}")
+                    villages_state.setdefault(str(v_idx), {"status": "ongoing", "updatedAt": _now_ts()})
+                    mark_taluka_state(d_idx, t_idx, "ongoing", current={"villageIndex": v_idx}, villages=villages_state)
+                    mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=None, lastPage=None, htmlSavedCount=0)
                     
                     key = f"{year}|{d_name}|{t_name}"
                     progress.setdefault(key, {})
@@ -2096,6 +2526,9 @@ def run_scraper_for_year(year, window_position):
                             'tahsil': t_name,
                             'village': v_name,
                             'property_no': str(gut_no),
+                            'district_idx': int(d_idx),
+                            'taluka_idx': int(t_idx),
+                            'village_idx': int(v_idx),
                             'd_val': d_val,
                             't_val': t_val,
                             'v_val': v_val,
@@ -2106,6 +2539,7 @@ def run_scraper_for_year(year, window_position):
                         html_count += saved_count
                         progress[key][v_name] = gut_no
                         save_progress(progress)
+                        mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=gut_no, lastPage=resume_from_page, htmlSavedCount=html_count)
                         
                         # Refresh website and re-enter details for next property (retry with new instance on session death)
                         if gut_no < 9:
@@ -2142,6 +2576,9 @@ def run_scraper_for_year(year, window_position):
                     progress[key][v_name] = 9
                     save_progress(progress)
                     safe_print(f"[VILLAGE {v_name}] Processing complete")
+                    mark_village_state(d_idx, t_idx, v_idx, "completed", lastGutNo=9, lastPage=None, htmlSavedCount=html_count)
+                    villages_state[str(v_idx)] = {"status": "completed", "updatedAt": _now_ts()}
+                    mark_taluka_state(d_idx, t_idx, "ongoing", current=None, villages=villages_state)
                     # Play village completion sound
                     play_village_complete_sound()
                     
@@ -2187,6 +2624,22 @@ def run_scraper_for_year(year, window_position):
         
         log_message("INFO", "COMPLETE", f"Scraping session completed for year {year}", final_summary)
         save_run_status()
+
+        # Mark year complete in Drive-only mode
+        mark_year_state("completed", current=None, districts=None)
+
+        # Final sync to Drive for everything under scraper_output/<year>
+        if drive_uploader and not DRIVE_ONLY:
+            try:
+                base_local_dir = os.path.join(os.getcwd(), "scraper_output")
+                year_dir = os.path.join(base_local_dir, str(year))
+                uploaded = drive_uploader.sync_directory(year_dir, base_local_dir)
+                # Also sync resume_state.json if present (lives at scraper_output/resume_state.json)
+                resume_state = os.path.join(base_local_dir, "resume_state.json")
+                drive_uploader.mirror_upload(resume_state, base_local_dir)
+                safe_print(f"[GDRIVE] Final sync done (uploaded {uploaded} files)")
+            except Exception as e:
+                safe_print(f"[GDRIVE] Final sync failed: {e}")
         play_alert_sound()
         play_year_complete_sound()  # Play special sound when year is completed
 
