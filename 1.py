@@ -735,7 +735,7 @@ def run_scraper_for_year(year, window_position):
     def save_run_status():
         try:
             if DRIVE_ONLY and drive_storage:
-                drive_storage.write_json([str(year), "logs"], "run_status.json", RUN_STATUS)
+                drive_storage.write_json([str(year)], "run_status.json", RUN_STATUS)
             else:
                 with open(RUN_STATUS_FILE, "w", encoding="utf-8") as f:
                     json.dump(RUN_STATUS, f, ensure_ascii=False, indent=2)
@@ -744,7 +744,7 @@ def run_scraper_for_year(year, window_position):
     
     def load_run_status():
         if DRIVE_ONLY and drive_storage:
-            data = drive_storage.read_json([str(year), "logs"], "run_status.json")
+            data = drive_storage.read_json([str(year)], "run_status.json")
             return data if isinstance(data, dict) else {}
         if os.path.exists(RUN_STATUS_FILE):
             try:
@@ -756,7 +756,7 @@ def run_scraper_for_year(year, window_position):
     
     def load_progress():
         if DRIVE_ONLY and drive_storage:
-            data = drive_storage.read_json([str(year), "logs"], "progress.json")
+            data = drive_storage.read_json([str(year)], "progress.json")
             return data if isinstance(data, dict) else {}
         if os.path.exists(PROGRESS_FILE):
             try:
@@ -769,7 +769,7 @@ def run_scraper_for_year(year, window_position):
     def save_progress(progress):
         try:
             if DRIVE_ONLY and drive_storage:
-                drive_storage.write_json([str(year), "logs"], "progress.json", progress)
+                drive_storage.write_json([str(year)], "progress.json", progress)
             else:
                 with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
                     json.dump(progress, f, ensure_ascii=False, indent=2)
@@ -821,7 +821,7 @@ def run_scraper_for_year(year, window_position):
                 data["page"] = page
             if DRIVE_ONLY and drive_storage:
                 # Write latest failure snapshot (overwrite) to Drive
-                drive_storage.write_json([str(y), "logs"], "failed_last.json", data)
+                drive_storage.write_json([str(y)], "failed_last.json", data)
             else:
                 with open(FAILED_FILE, "a", encoding="utf-8") as f:
                     f.write(json.dumps(data, ensure_ascii=False) + "\n")
@@ -832,7 +832,7 @@ def run_scraper_for_year(year, window_position):
         try:
             data = {"year": y, "district": d, "tahsil": t, "village": v, "gut": g}
             if DRIVE_ONLY and drive_storage:
-                drive_storage.write_json([str(y), "logs"], "special_last.json", data)
+                drive_storage.write_json([str(y)], "special_last.json", data)
             else:
                 with open(SPECIAL_FILE, "a", encoding="utf-8") as f:
                     f.write(json.dumps(data, ensure_ascii=False) + "\n")
@@ -850,7 +850,7 @@ def run_scraper_for_year(year, window_position):
             }
             
             if DRIVE_ONLY and drive_storage:
-                drive_storage.write_json([str(year), "logs"], "village_mismatch_last.json", mismatch_data)
+                drive_storage.write_json([str(year)], "village_mismatch_last.json", mismatch_data)
             else:
                 with open(VILLAGE_MISMATCH_FILE, "a", encoding="utf-8") as f:
                     f.write(json.dumps(mismatch_data, ensure_ascii=False) + "\n")
@@ -870,7 +870,7 @@ def run_scraper_for_year(year, window_position):
         seen = {}
         try:
             if DRIVE_ONLY and drive_storage:
-                data = drive_storage.read_bytes([str(year), "logs"], "seen_docs.txt")
+                data = drive_storage.read_bytes([str(year)], "seen_docs.txt")
                 if data:
                     for raw_line in data.decode("utf-8", errors="ignore").splitlines():
                         line = raw_line.strip()
@@ -895,8 +895,8 @@ def run_scraper_for_year(year, window_position):
         try:
             line = f"{village_hash}|{content_hash}\n"
             if DRIVE_ONLY and drive_storage:
-                existing = drive_storage.read_bytes([str(year), "logs"], "seen_docs.txt") or b""
-                drive_storage.upsert_bytes([str(year), "logs"], "seen_docs.txt", existing + line.encode("utf-8"), mime="text/plain; charset=utf-8")
+                existing = drive_storage.read_bytes([str(year)], "seen_docs.txt") or b""
+                drive_storage.upsert_bytes([str(year)], "seen_docs.txt", existing + line.encode("utf-8"), mime="text/plain; charset=utf-8")
             else:
                 with open(SEEN_DOCS_FILE, "a", encoding="utf-8") as f:
                     f.write(line)
