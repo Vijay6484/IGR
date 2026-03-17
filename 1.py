@@ -1455,7 +1455,8 @@ def run_scraper_for_year(year, window_position):
     
     def wait_for_results(driver):
         try:
-            WebDriverWait(driver, 60).until(
+            # If HAS_DATA/NO_RECORDS doesn't appear quickly, treat as NO_LOAD.
+            WebDriverWait(driver, 5).until(
                 lambda d: d.find_elements(By.ID, "RegistrationGrid") or d.find_elements(By.ID, "lblMsgCTS1")
             )
             
@@ -1464,7 +1465,7 @@ def run_scraper_for_year(year, window_position):
             
             if driver.find_elements(By.ID, "RegistrationGrid"):
                 try:
-                    WebDriverWait(driver, 40).until(
+                    WebDriverWait(driver, 5).until(
                         lambda d: d.find_elements(By.XPATH, "//input[@value='IndexII']")
                     )
                 except TimeoutException:
@@ -2342,6 +2343,21 @@ def run_scraper_for_year(year, window_position):
                         driver, wait = safe_browser_restart()
                         continue
                     safe_print(f"[GUT {gut_no}] NO_LOAD persisted after retry; marking as failed/special")
+                    # For resume: set village.json lastGutNo to (gut_no - 1) so next run retries same gut.
+                    try:
+                        if DRIVE_ONLY and drive_storage:
+                            d_idx = meta.get("district_idx")
+                            t_idx = meta.get("taluka_idx")
+                            v_idx = meta.get("village_idx")
+                            if d_idx and t_idx and v_idx:
+                                v_path = [str(meta["year"]), str(d_idx), str(t_idx), str(v_idx)]
+                                v_state = drive_storage.read_json(v_path, "village.json") or {}
+                                v_state["lastGutNo"] = max(int(gut_no) - 1, 0)
+                                v_state["status"] = "ongoing"
+                                v_state["updatedAt"] = time.strftime('%Y-%m-%d %H:%M:%S')
+                                drive_storage.write_json(v_path, "village.json", v_state)
+                    except Exception as _e:
+                        safe_print(f"[GDRIVE] Failed to backtrack village.json on NO_LOAD: {_e}")
                     log_failed(meta['year'], meta['district'], meta['tahsil'], meta['village'], gut_no)
                     log_message("WARN", "NO_LOAD", f"NO_LOAD persisted for gut {gut_no} after one refresh retry", meta)
                     return 0
