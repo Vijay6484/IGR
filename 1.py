@@ -22,6 +22,7 @@ import psutil
 import logging
 import random
 import mimetypes
+import uuid
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -165,6 +166,15 @@ class GoogleDriveUploader:
         if self.root_folder_id:
             return self.root_folder_id
 
+        # If the user did not provide a root folder ID, we may auto-create by name.
+        # In multi-process runs, auto-create can lead to duplicates. Allow disabling.
+        disable_auto_create = os.environ.get("GDRIVE_DISABLE_ROOT_AUTO_CREATE", "").strip().lower() in ("1", "true", "yes", "on")
+        if disable_auto_create:
+            raise RuntimeError(
+                "[GDRIVE] GDRIVE_ROOT_FOLDER_ID is required when GDRIVE_DISABLE_ROOT_AUTO_CREATE=1. "
+                "Create one parent folder in Drive manually and set GDRIVE_ROOT_FOLDER_ID to its folder ID."
+            )
+
         # Service accounts have no storage quota; they must use a Shared Drive.
         if self.auth_mode == "service_account" and not self.shared_drive_id:
             raise RuntimeError(
@@ -182,11 +192,23 @@ class GoogleDriveUploader:
             f"name='{self._escape_query(self.root_folder_name)}' and "
             f"'{parent_for_root}' in parents and trashed=false"
         )
-        resp = svc.files().list(q=q, fields="files(id,name)", pageSize=10, **self._list_kwargs()).execute()
-        files = resp.get("files", [])
-        if files:
-            self.root_folder_id = files[0]["id"]
-            return self.root_folder_id
+        # In parallel runs (e.g. 42 tmux sessions), name-based create can race and
+        # multiple root folders with the same name can be created. To reduce this:
+        # - If multiple matches exist, always pick the first returned.
+        # - If none found, retry listing a few times with jitter before creating.
+        for attempt in range(3):
+            resp = svc.files().list(q=q, fields="files(id,name,createdTime)", pageSize=10, **self._list_kwargs()).execute()
+            files = resp.get("files", [])
+            if files:
+                # Pick the oldest folder if multiple exist (stable choice)
+                try:
+                    files.sort(key=lambda x: x.get("createdTime") or "")
+                except Exception:
+                    pass
+                self.root_folder_id = files[0]["id"]
+                return self.root_folder_id
+            # brief jitter before retry to allow another process to finish creating
+            time.sleep(0.4 + random.random() * 0.8)
 
         folder_meta = {"name": self.root_folder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_for_root]}
         created = svc.files().create(body=folder_meta, fields="id", **self._drive_kwargs()).execute()
