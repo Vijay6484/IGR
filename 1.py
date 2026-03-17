@@ -2317,19 +2317,20 @@ def run_scraper_for_year(year, window_position):
                     return 0
                 
                 result_status = wait_for_results(driver)
-                safe_print(f"[GUT {gut_no}] Search result: {result_status}")
+                norm_status = (str(result_status) if result_status is not None else "").strip().upper().replace(" ", "_")
+                safe_print(f"[GUT {gut_no}] Search result: {result_status} (norm={norm_status})")
                 
-                if result_status == "HAS_DATA":
+                if norm_status == "HAS_DATA":
                     saved_count = scrape_all_pages_for_gut(driver, wait, meta, suffix, resume_from_page)
                     safe_print(f"[GUT {gut_no}] Successfully scraped {saved_count} records")
                     log_message("INFO", "SUCCESS", f"Scraped {saved_count} records for gut {gut_no}", meta)
                     global_counter["total_records"] += saved_count
                     return saved_count
-                elif result_status == "NO_RECORDS":
+                elif norm_status == "NO_RECORDS":
                     safe_print(f"[GUT {gut_no}] No records found")
                     log_message("INFO", "NO_RECORDS", f"No records found for gut {gut_no}", meta)
                     return 0
-                elif result_status == "NO_LOAD":
+                elif norm_status == "NO_LOAD":
                     # If the results grid didn't load after captcha, refresh and retry THIS gut once.
                     if not retried_no_load:
                         retried_no_load = True
