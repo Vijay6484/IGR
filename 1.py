@@ -2458,7 +2458,10 @@ def run_scraper_for_year(year, window_position):
             obj["htmlSavedCount"] = int(htmlSavedCount)
         _write_state_json([str(year), str(d_idx), str(t_idx), str(v_idx)], "village.json", obj)
     
-    resume_from = load_resume_state()
+    # Resume logic:
+    # - In DRIVE_ONLY mode, rely only on per-folder JSON state (year/district/taluka/village).
+    # - In local mode, use resume_state.json + progress.json.
+    resume_from = None if (DRIVE_ONLY and drive_storage) else load_resume_state()
     if resume_from and resume_from.get("year") != year:
         resume_from = None
     if resume_from:
@@ -2547,19 +2550,36 @@ def run_scraper_for_year(year, window_position):
                     safe_print(f"[VILLAGE] Processing {v_name}")
                     villages_state.setdefault(str(v_idx), {"status": "ongoing", "updatedAt": _now_ts()})
                     mark_taluka_state(d_idx, t_idx, "ongoing", current={"villageIndex": v_idx}, villages=villages_state)
-                    mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=None, lastPage=None, htmlSavedCount=0)
                     
-                    key = f"{year}|{d_name}|{t_name}"
-                    progress.setdefault(key, {})
-                    last_gut = progress[key].get(v_name, -1)
-                    if resume_from and d_name == resume_from.get("district_name") and t_name == resume_from.get("tahsil_name") and v_name == resume_from.get("village_name"):
-                        last_gut = max(int(last_gut), resume_from.get("property_no", 1) - 1)
-                        safe_print(f"[RESUME] Starting from property {last_gut + 1} (checkpoint was property {resume_from.get('property_no')} page {resume_from.get('page')})")
-                    if last_gut >= 9:
-                        safe_print(f"[VILLAGE {v_name}] Already complete (last_gut={last_gut}), skipping")
-                        continue
+                    # Determine last_gut from Drive village.json when DRIVE_ONLY; otherwise from local progress.json
+                    last_gut = -1
+                    if DRIVE_ONLY and drive_storage:
+                        v_path = [str(year), str(d_idx), str(t_idx), str(v_idx)]
+                        v_state = drive_storage.read_json(v_path, "village.json") or {}
+                        if isinstance(v_state, dict):
+                            if str(v_state.get("status", "")).strip().lower() == "completed":
+                                safe_print(f"[VILLAGE {v_name}] Already complete (village.json status=completed), skipping")
+                                continue
+                            try:
+                                last_gut = int(v_state.get("lastGutNo", -1))
+                            except Exception:
+                                last_gut = -1
+                        # If no state yet, initialize
+                        if last_gut < 0:
+                            mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=None, lastPage=None, htmlSavedCount=0)
+                    else:
+                        key = f"{year}|{d_name}|{t_name}"
+                        progress.setdefault(key, {})
+                        last_gut = progress[key].get(v_name, -1)
+                        if resume_from and d_name == resume_from.get("district_name") and t_name == resume_from.get("tahsil_name") and v_name == resume_from.get("village_name"):
+                            last_gut = max(int(last_gut), resume_from.get("property_no", 1) - 1)
+                            safe_print(f"[RESUME] Starting from property {last_gut + 1} (checkpoint was property {resume_from.get('property_no')} page {resume_from.get('page')})")
+                        if last_gut >= 9:
+                            safe_print(f"[VILLAGE {v_name}] Already complete (last_gut={last_gut}), skipping")
+                            continue
                         
-                    save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, 1, 1)
+                    if not (DRIVE_ONLY and drive_storage):
+                        save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, 1, 1)
                     if not select_dropdown_safe(driver, "ddlvillage", v_val):
                         safe_print(f"[ERROR] Failed to select village {v_name}, skipping")
                         log_village_mismatch(d_name, t_name, v_name, 
@@ -2569,10 +2589,9 @@ def run_scraper_for_year(year, window_position):
                     for gut_no in range(max(1, int(last_gut) + 1), 10):
                         if os.path.exists(STOP_FILE):
                             break
-                        save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, gut_no, 1)
-                        resume_from_page = (resume_from and d_name == resume_from.get("district_name") and t_name == resume_from.get("tahsil_name") and v_name == resume_from.get("village_name") and gut_no == resume_from.get("property_no")) and (resume_from.get("page", 0) + 1) or 1
-                        if resume_from_page > 1:
-                            safe_print(f"[RESUME] Will resume gut {gut_no} from page {resume_from_page}")
+                        if not (DRIVE_ONLY and drive_storage):
+                            save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, gut_no, 1)
+                        resume_from_page = 1
                         safe_print(f"\n[GUT {gut_no}] Processing gut {gut_no} in village {v_name}")
                         
                         meta = {
@@ -2592,8 +2611,9 @@ def run_scraper_for_year(year, window_position):
                         
                         saved_count = process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page)
                         html_count += saved_count
-                        progress[key][v_name] = gut_no
-                        save_progress(progress)
+                        if not (DRIVE_ONLY and drive_storage):
+                            progress[key][v_name] = gut_no
+                            save_progress(progress)
                         mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=gut_no, lastPage=resume_from_page, htmlSavedCount=html_count)
                         
                         # Refresh website and re-enter details for next property (retry with new instance on session death)
@@ -2628,8 +2648,9 @@ def run_scraper_for_year(year, window_position):
                             if not refresh_ok:
                                 break
                     
-                    progress[key][v_name] = 9
-                    save_progress(progress)
+                    if not (DRIVE_ONLY and drive_storage):
+                        progress[key][v_name] = 9
+                        save_progress(progress)
                     safe_print(f"[VILLAGE {v_name}] Processing complete")
                     mark_village_state(d_idx, t_idx, v_idx, "completed", lastGutNo=9, lastPage=None, htmlSavedCount=html_count)
                     villages_state[str(v_idx)] = {"status": "completed", "updatedAt": _now_ts()}
