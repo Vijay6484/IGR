@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import time
 import json
 import subprocess
@@ -676,6 +677,8 @@ def run_scraper_for_year(year, window_position):
     global_counter = {"total_records": 0, "total_pages": 0}
     RUN_STATUS = {}
     stop_script = False
+    # Chrome --user-data-dir path for this process; deleted on quit so restarts don't fill the VPS disk.
+    chrome_user_data_dir_latest = [None]
     STOP_FILE = os.path.join(os.path.expanduser("~/Documents"), "stop_script.txt")
     
     # Setup logging based on selected type
@@ -981,6 +984,17 @@ def run_scraper_for_year(year, window_position):
         # Kill any remaining Chrome processes for this process only
         kill_all_chrome_processes()
         cleanup_orphaned_chrome_processes()
+
+        # Remove this session's Chrome profile dir (~/.chrome_scraper_<year>_<ts>).
+        # Without this, every safe_browser_restart() left a new folder (100+ MB each) and fills the disk.
+        path = chrome_user_data_dir_latest[0]
+        if path and os.path.isdir(path):
+            try:
+                shutil.rmtree(path, ignore_errors=True)
+                safe_print(f"[CHROME PROFILE] Removed user data dir: {path}")
+            except Exception as e:
+                safe_print(f"[CHROME PROFILE WARN] Could not remove {path}: {e}")
+        chrome_user_data_dir_latest[0] = None
     
     def safe_browser_restart(max_retries=MAX_SESSION_RETRY):
         for attempt in range(1, max_retries + 1):
@@ -1041,10 +1055,12 @@ def run_scraper_for_year(year, window_position):
                 opts.add_experimental_option("excludeSwitches", ["enable-automation"])
                 opts.add_experimental_option('useAutomationExtension', False)
                 
-                # Add unique user data directory with timestamp to avoid lock issues
+                # Unique user data directory per session (timestamp avoids lock if an old dir lingers).
+                # Directory is removed in terminate_driver_safely() so it does not accumulate on disk.
                 timestamp = int(time.time())
                 user_data_dir = os.path.join(os.path.expanduser("~"), f".chrome_scraper_{year}_{timestamp}")
                 opts.add_argument(f"--user-data-dir={user_data_dir}")
+                chrome_user_data_dir_latest[0] = user_data_dir
                 
                 # Headless mode: no visible browser (required for VPS, optional for local)
                 if HEADLESS_MODE:
