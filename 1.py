@@ -1172,7 +1172,7 @@ def run_scraper_for_year(year, window_position):
         return None
     
     def submit_dummy_captcha(driver, wait, safe_print_func):
-        """First captcha step: always enter 1 and submit (loads the real captcha for OCR)."""
+        """First try: enter 1 and submit — site then shows the real captcha for the second try."""
         try:
             # Find captcha input and submit button
             cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
@@ -1185,9 +1185,15 @@ def run_scraper_for_year(year, window_position):
             except:
                 old_captcha_src = None
             
-            # Submit dummy captcha
+            safe_print_func(
+                '[CAPTCHA] First try: entering "1" in the captcha field and submitting (dummy — not the real code)...'
+            )
             driver.execute_script("arguments[0].value='1';", cap_input)
             submit_btn.click()
+            safe_print_func(
+                "[CAPTCHA] First try: submitted. After a moment the page shows another captcha — "
+                "second try will solve it (OCR or CapSolver) and submit the real value."
+            )
             
             # Return the captcha element for later use
             try:
@@ -1201,11 +1207,9 @@ def run_scraper_for_year(year, window_position):
             return None
     
     def solve_captcha_with_api_and_submit(driver, wait, safe_print_func, captcha_image_path):
-        """Second captcha step: OCR the image and submit (after submit_dummy_captcha entered 1).
+        """Second try: after first try (dummy=1), wait for real captcha, OCR it, submit real value.
 
-        Flow: submit_dummy_captcha() always enters 1 for the first captcha. This function waits for
-        the replacement captcha, solves it locally, and submits. On retries, it enters 1 again to
-        refresh the image, then solves the new captcha.
+        Retries: enter 1 again (mini first try), then second try with OCR again.
         """
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1224,8 +1228,10 @@ def run_scraper_for_year(year, window_position):
                     old_captcha_src = None
 
                 if attempt > 1:
-                    # First step again: enter 1 to fetch a new captcha, then OCR below
-                    safe_print_func(f"[CAPTCHA] Retry {attempt}/{max_attempts}: entering 1 to refresh captcha")
+                    safe_print_func(
+                        f"[CAPTCHA] Retry {attempt}/{max_attempts}: mini first try — entering \"1\" again to get a "
+                        f"fresh captcha, then second try with real OCR value..."
+                    )
                     driver.execute_script("arguments[0].value='1';", cap_input)
                     driver.find_element(By.ID, "btnSearch_RestMaha").click()
                     time.sleep(0.5)
@@ -1276,14 +1282,14 @@ def run_scraper_for_year(year, window_position):
                 try:
                     if attempt == 1:
                         safe_print_func(
-                            f"[CAPTCHA] Second step — waiting for captcha image after first submit=1 "
-                            f"(attempt {attempt}/{max_attempts}, timeout: {MAX_CAPTCHA_WAIT}s)..."
+                            f"[CAPTCHA] Second try: waiting for the real captcha image to appear "
+                            f"(after first try; timeout {MAX_CAPTCHA_WAIT}s)..."
                         )
                         WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
                     else:
                         safe_print_func(
-                            f"[CAPTCHA] Waiting for new captcha after refresh (attempt {attempt}/{max_attempts}, "
-                            f"timeout: {MAX_CAPTCHA_WAIT}s)..."
+                            f"[CAPTCHA] Second try: waiting for new real captcha image after mini first try "
+                            f"(attempt {attempt}/{max_attempts}, timeout {MAX_CAPTCHA_WAIT}s)..."
                         )
                         WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_refresh_submit)
                     time.sleep(1)
@@ -1291,7 +1297,7 @@ def run_scraper_for_year(year, window_position):
                     if not is_browser_alive(driver):
                         return False
 
-                    safe_print_func("[CAPTCHA] Fetching captcha image and solving (OCR)...")
+                    safe_print_func("[CAPTCHA] Second try: reading captcha with OCR, then submitting the real search value...")
                     # Solve captcha locally using selected OCR engine
                     solver = os.environ.get("CAPTCHA_SOLVER", "tesseract").strip().lower()
                     if solver == "paddle":
@@ -1309,7 +1315,10 @@ def run_scraper_for_year(year, window_position):
                     
                     # Try each possible solution
                     for i, captcha_text in enumerate(possible_solutions):
-                        safe_print_func(f"[CAPTCHA] Trying solution {i+1}/{len(possible_solutions)}: {captcha_text}")
+                        safe_print_func(
+                            f"[CAPTCHA] Second try: candidate {i+1}/{len(possible_solutions)} — "
+                            f"entering real captcha \"{captcha_text}\" and submitting Search..."
+                        )
                         
                         if not is_browser_alive(driver):
                             return False
@@ -1324,14 +1333,17 @@ def run_scraper_for_year(year, window_position):
                         try:
                             error_msg = driver.find_element(By.ID, "lblMsgCTS1").text
                             if "Invalid Captcha" in error_msg or "wrong captcha" in error_msg.lower():
-                                safe_print_func(f"[CAPTCHA] Solution {captcha_text} was incorrect")
+                                safe_print_func(f"[CAPTCHA] Second try: value \"{captcha_text}\" rejected — trying next candidate")
                                 continue
                             else:
-                                safe_print_func(f"[CAPTCHA] Solved and submitted: {captcha_text}")
+                                safe_print_func(
+                                    f"[CAPTCHA] Second try: success — submitted real captcha \"{captcha_text}\" and Search accepted."
+                                )
                                 return True
                         except NoSuchElementException:
-                            # No error message, likely successful
-                            safe_print_func(f"[CAPTCHA] Solved and submitted: {captcha_text}")
+                            safe_print_func(
+                                f"[CAPTCHA] Second try: success — submitted real captcha \"{captcha_text}\" (no error message)."
+                            )
                             return True
                             
                 except TimeoutException:
@@ -1350,10 +1362,9 @@ def run_scraper_for_year(year, window_position):
         return False
     
     def solve_captcha_with_capsolver_and_submit(driver, wait, safe_print_func, captcha_image_path):
-        """Second captcha step using CapSolver (ImageToTextTask), after submit_dummy_captcha entered 1.
+        """Second try using CapSolver API, after submit_dummy_captcha did first try (dummy=1).
 
-        Same two-step pattern as OCR: wait for the real captcha, then solve via API and submit.
-        Retries use the same \"enter 1 then wait for new image\" flow as the OCR solver.
+        Same pattern as OCR: first try = 1, second try = real value from CapSolver.
         """
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1369,7 +1380,10 @@ def run_scraper_for_year(year, window_position):
                     old_captcha_src = None
 
                 if attempt > 1:
-                    safe_print_func(f"[CAPTCHA API] Retry {attempt}/{max_attempts}: entering 1 to refresh captcha")
+                    safe_print_func(
+                        f"[CAPTCHA API] Retry {attempt}/{max_attempts}: mini first try — entering \"1\" again, "
+                        f"then second try with CapSolver real value..."
+                    )
                     driver.execute_script("arguments[0].value='1';", cap_input)
                     driver.find_element(By.ID, "btnSearch_RestMaha").click()
                     time.sleep(0.5)
@@ -1417,14 +1431,14 @@ def run_scraper_for_year(year, window_position):
                 try:
                     if attempt == 1:
                         safe_print_func(
-                            f"[CAPTCHA API] Second step — waiting for captcha image after first submit=1 "
-                            f"(attempt {attempt}/{max_attempts}, timeout: {MAX_CAPTCHA_WAIT}s)..."
+                            f"[CAPTCHA API] Second try (CapSolver): waiting for real captcha image after first try "
+                            f"(timeout {MAX_CAPTCHA_WAIT}s)..."
                         )
                         WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
                     else:
                         safe_print_func(
-                            f"[CAPTCHA API] Waiting for new captcha after refresh (attempt {attempt}/{max_attempts}, "
-                            f"timeout: {MAX_CAPTCHA_WAIT}s)..."
+                            f"[CAPTCHA API] Second try (CapSolver): waiting for new image after mini first try "
+                            f"({attempt}/{max_attempts}, timeout {MAX_CAPTCHA_WAIT}s)..."
                         )
                         WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_refresh_submit)
                     time.sleep(1)
@@ -1446,7 +1460,9 @@ def run_scraper_for_year(year, window_position):
                         safe_print_func("[CAPTCHA API] CAPTCHA_API_KEY not set in captcha_config.py")
                         return False
 
-                    safe_print_func("[CAPTCHA API] Solving captcha via CapSolver...")
+                    safe_print_func(
+                        "[CAPTCHA API] Second try (CapSolver): sending image to API, then will submit real captcha value..."
+                    )
                     possible_solutions = solve_captcha_with_api(captcha_image_path, CAPTCHA_API_KEY)
                     if possible_solutions is None:
                         safe_print_func("[CAPTCHA API] CapSolver did not return a solution")
@@ -1455,7 +1471,10 @@ def run_scraper_for_year(year, window_position):
                         return False
 
                     for i, captcha_text in enumerate(possible_solutions):
-                        safe_print_func(f"[CAPTCHA API] Trying solution {i+1}/{len(possible_solutions)}: {captcha_text}")
+                        safe_print_func(
+                            f"[CAPTCHA API] Second try: candidate {i+1}/{len(possible_solutions)} — "
+                            f"entering real captcha \"{captcha_text}\" and submitting Search..."
+                        )
                         if not is_browser_alive(driver):
                             return False
                         cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
@@ -1465,13 +1484,19 @@ def run_scraper_for_year(year, window_position):
                         try:
                             error_msg = driver.find_element(By.ID, "lblMsgCTS1").text
                             if "Invalid Captcha" in error_msg or "wrong captcha" in error_msg.lower():
-                                safe_print_func(f"[CAPTCHA API] Solution {captcha_text} was incorrect")
+                                safe_print_func(
+                                    f"[CAPTCHA API] Second try: value \"{captcha_text}\" rejected — trying next candidate"
+                                )
                                 continue
                             else:
-                                safe_print_func(f"[CAPTCHA API] Solved and submitted: {captcha_text}")
+                                safe_print_func(
+                                    f"[CAPTCHA API] Second try: success — submitted real captcha \"{captcha_text}\" (CapSolver)."
+                                )
                                 return True
                         except NoSuchElementException:
-                            safe_print_func(f"[CAPTCHA API] Solved and submitted: {captcha_text}")
+                            safe_print_func(
+                                f"[CAPTCHA API] Second try: success — submitted real captcha \"{captcha_text}\" (CapSolver)."
+                            )
                             return True
 
                 except TimeoutException:
@@ -2053,9 +2078,12 @@ def run_scraper_for_year(year, window_position):
                 
                 status = wait_for_results(driver)
                 if status == "NO_LOAD":
-                    safe_print("[RESUME] NO_LOAD after OCR captcha; reloading form and using CapSolver...")
                     safe_print(
-                        f"[TRACK] resume gut={meta['property_no']} phase=no_load→capsolver "
+                        "[RESUME] NO_LOAD after second try (OCR). Reloading form — will do first try (1) again, "
+                        "then second try with CapSolver (real value)."
+                    )
+                    safe_print(
+                        f"[TRACK] resume gut={meta['property_no']} first_try→second_try=capsolver "
                         f"target_page={target_page}"
                     )
                     if not safe_get_url(driver, WEBSITE_URL):
@@ -2077,7 +2105,7 @@ def run_scraper_for_year(year, window_position):
                     status = wait_for_results(driver)
                     norm_resume = (str(status) if status is not None else "").strip().upper().replace(" ", "_")
                     safe_print(
-                        f"[TRACK] resume gut={meta['property_no']} phase=after_capsolver norm={norm_resume}"
+                        f"[TRACK] resume gut={meta['property_no']} after_second_try=capsolver norm={norm_resume}"
                     )
                 if status != "HAS_DATA":
                     raise RuntimeError(f"No data found after resuming, status: {status}")
@@ -2544,7 +2572,7 @@ def run_scraper_for_year(year, window_position):
                 norm_status = (str(result_status) if result_status is not None else "").strip().upper().replace(" ", "_")
                 safe_print(f"[GUT {gut_no}] Search result: {result_status} (norm={norm_status})")
                 safe_print(
-                    f"[TRACK] gut={gut_no} phase=after_ocr_captcha norm={norm_status} "
+                    f"[TRACK] gut={gut_no} after_second_try=ocr norm={norm_status} "
                     f"attempt={attempt}/{MAX_SESSION_RETRY} year={meta.get('year')} "
                     f"district={meta.get('district')} village={meta.get('village')}"
                 )
@@ -2553,10 +2581,11 @@ def run_scraper_for_year(year, window_position):
                 if norm_status == "NO_LOAD" and not tried_capsolver_after_no_load:
                     tried_capsolver_after_no_load = True
                     safe_print(
-                        f"[GUT {gut_no}] NO_LOAD after OCR; reloading form and solving second captcha with CapSolver..."
+                        f"[GUT {gut_no}] NO_LOAD after second try (OCR). Reloading — first try (1) again, "
+                        f"then second try with CapSolver (real captcha from API)..."
                     )
                     safe_print(
-                        f"[TRACK] gut={gut_no} phase=no_load→capsolver action=reload_form+solve_api "
+                        f"[TRACK] gut={gut_no} first_try→second_try=capsolver "
                         f"attempt={attempt}/{MAX_SESSION_RETRY}"
                     )
                     if not safe_get_url(driver, WEBSITE_URL):
@@ -2590,9 +2619,11 @@ def run_scraper_for_year(year, window_position):
                         return 0
                     result_status = wait_for_results(driver)
                     norm_status = (str(result_status) if result_status is not None else "").strip().upper().replace(" ", "_")
-                    safe_print(f"[GUT {gut_no}] Search result after CapSolver: {result_status} (norm={norm_status})")
                     safe_print(
-                        f"[TRACK] gut={gut_no} phase=after_capsolver norm={norm_status} "
+                        f"[GUT {gut_no}] After second try (CapSolver), search result: {result_status} (norm={norm_status})"
+                    )
+                    safe_print(
+                        f"[TRACK] gut={gut_no} after_second_try=capsolver norm={norm_status} "
                         f"attempt={attempt}/{MAX_SESSION_RETRY} year={meta.get('year')} "
                         f"district={meta.get('district')} village={meta.get('village')}"
                     )
@@ -2610,10 +2641,11 @@ def run_scraper_for_year(year, window_position):
                 elif norm_status == "NO_LOAD":
                     # Still NO_LOAD after OCR (and CapSolver if that ran): move on to next property number.
                     safe_print(
-                        f"[GUT {gut_no}] NO_LOAD after OCR/CapSolver; skipping to next property number"
+                        f"[GUT {gut_no}] Still NO_LOAD after first try + second try (OCR and/or CapSolver); "
+                        f"skipping to next property number."
                     )
                     safe_print(
-                        f"[TRACK] gut={gut_no} phase=final_no_load action=skip_to_next_property "
+                        f"[TRACK] gut={gut_no} final_no_load skip_next_property "
                         f"tried_capsolver={tried_capsolver_after_no_load}"
                     )
                     log_failed(meta['year'], meta['district'], meta['tahsil'], meta['village'], gut_no)
