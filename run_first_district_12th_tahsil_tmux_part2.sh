@@ -2,6 +2,7 @@
 
 # Start tmux sessions for the SECOND half of years, each running
 # `run_first_district_12th_tahsil.py` (district 1, tehsil 12, headless/VPS).
+# Captcha flow is in 1.py: first submit "1", then OCR the real captcha.
 # Years covered here: 2004 down to 1984 (21 years, inclusive).
 
 set -euo pipefail

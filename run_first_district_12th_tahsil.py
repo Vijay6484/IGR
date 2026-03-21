@@ -6,6 +6,10 @@ Run the IGR scraper in VPS/headless mode by default and only process:
 
 All villages in that tehsil are processed unless ONLY_VILLAGE_INDEX is set in the environment.
 
+Captcha (handled inside 1.py — no extra flags needed):
+  - First captcha: always submit "1" (submit_dummy_captcha).
+  - Second step: wait for the real image, then OCR (Tesseract/Paddle via CAPTCHA_SOLVER) and submit.
+
 Set VPS_MODE=0 before running for a visible browser (local debugging).
 
 Equivalent (default headless):
@@ -37,6 +41,7 @@ def main():
         f"[run_first_district_12th_tahsil] Year: {year}, {mode}, "
         "ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12"
     )
+    print("[run_first_district_12th_tahsil] Captcha: first submit=1, then OCR (1.py)")
     rc = subprocess.run([sys.executable, one_py, year], env=env, cwd=script_dir)
     sys.exit(rc.returncode)
 
