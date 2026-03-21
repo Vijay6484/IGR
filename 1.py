@@ -627,6 +627,12 @@ def run_scraper_for_year(year, window_position):
     except ValueError:
         ONLY_VILLAGE_INDEX = 0
 
+    # Optional: skip villages before this 1-based index (e.g. 3 = start at 3rd village). Works with ONLY_* filters.
+    try:
+        MIN_VILLAGE_INDEX = int(os.environ.get("MIN_VILLAGE_INDEX", "").strip() or "0")
+    except ValueError:
+        MIN_VILLAGE_INDEX = 0
+
     # Optional: restrict to one district / tahsil by 1-based dropdown index (like ONLY_VILLAGE_INDEX).
     try:
         ONLY_DISTRICT_INDEX = int(os.environ.get("ONLY_DISTRICT_INDEX", "").strip() or "0")
@@ -1172,18 +1178,18 @@ def run_scraper_for_year(year, window_position):
         return None
     
     def submit_dummy_captcha(driver, wait, safe_print_func):
-        """First try: enter 1 and submit — site then shows the real captcha for the second try."""
+        """First try: enter 1, submit, return (img element, captcha src BEFORE submit) for second-try wait."""
         try:
             # Find captcha input and submit button
             cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
             submit_btn = wait.until(EC.element_to_be_clickable((By.ID, "btnSearch_RestMaha")))
             
-            # Get current captcha image source for comparison later
+            # Snapshot captcha image URL *before* dummy submit — second try must wait until this changes
             try:
                 img_elem = driver.find_element(By.ID, "imgCaptcha_new")
-                old_captcha_src = img_elem.get_attribute("src")
-            except:
-                old_captcha_src = None
+                src_before_submit = img_elem.get_attribute("src")
+            except Exception:
+                src_before_submit = None
             
             safe_print_func(
                 '[CAPTCHA] First try: entering "1" in the captcha field and submitting (dummy — not the real code)...'
@@ -1191,25 +1197,27 @@ def run_scraper_for_year(year, window_position):
             driver.execute_script("arguments[0].value='1';", cap_input)
             submit_btn.click()
             safe_print_func(
-                "[CAPTCHA] First try: submitted. After a moment the page shows another captcha — "
-                "second try will solve it (OCR or CapSolver) and submit the real value."
+                "[CAPTCHA] First try: Search clicked — waiting for the page to load a NEW captcha image "
+                "(second try will not run until the image changes)."
             )
+            # Brief pause so the browser can start the round-trip; second-try code waits for src change
+            time.sleep(0.6)
             
-            # Return the captcha element for later use
             try:
                 captcha_elem = driver.find_element(By.ID, "imgCaptcha_new")
-                return captcha_elem
-            except:
-                return None
+                return captcha_elem, src_before_submit
+            except Exception:
+                return None, src_before_submit
                 
         except Exception as e:
             safe_print_func(f"[DUMMY CAPTCHA ERROR] {e}")
-            return None
+            return None, None
     
-    def solve_captcha_with_api_and_submit(driver, wait, safe_print_func, captcha_image_path):
-        """Second try: after first try (dummy=1), wait for real captcha, OCR it, submit real value.
+    def solve_captcha_with_api_and_submit(driver, wait, safe_print_func, captcha_image_path, src_before_dummy_submit=None):
+        """Second try: after first try (dummy=1), wait until captcha image *changes*, then OCR and submit.
 
-        Retries: enter 1 again (mini first try), then second try with OCR again.
+        src_before_dummy_submit: img src captured in submit_dummy_captcha *before* clicking Search with "1".
+        Retries: enter 1 again, wait for src change, then OCR again.
         """
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1220,12 +1228,25 @@ def run_scraper_for_year(year, window_position):
                 # Wait for captcha input to be present
                 cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
                 
-                # Snapshot current image src (for retry: after another "1" submit we wait for src change)
-                try:
-                    img_elem = driver.find_element(By.ID, "imgCaptcha_new")
-                    old_captcha_src = img_elem.get_attribute("src")
-                except Exception:
-                    old_captcha_src = None
+                # Baseline for "new image loaded": must differ from first-try image (or pre-retry image)
+                old_captcha_src = None
+                baseline_src = None
+                if attempt == 1:
+                    baseline_src = src_before_dummy_submit
+                    if baseline_src is None:
+                        try:
+                            baseline_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src")
+                            safe_print_func(
+                                "[CAPTCHA] Second try: no src from first try — using current img src as baseline until it changes."
+                            )
+                        except Exception:
+                            baseline_src = None
+                else:
+                    try:
+                        img_elem = driver.find_element(By.ID, "imgCaptcha_new")
+                        old_captcha_src = img_elem.get_attribute("src")
+                    except Exception:
+                        old_captcha_src = None
 
                 if attempt > 1:
                     safe_print_func(
@@ -1258,8 +1279,31 @@ def run_scraper_for_year(year, window_position):
                     except Exception:
                         return False
 
-                # After first dummy (caller): wait for real captcha — allow data:image / base64
-                def captcha_ready_after_first_dummy(driver):
+                # After first dummy: wait until captcha img src != baseline (new puzzle), then image painted
+                def captcha_ready_new_image_after_dummy(driver):
+                    try:
+                        try:
+                            driver.find_element(By.ID, "ddlFromYear1")
+                        except NoSuchElementException:
+                            return False
+                        if not is_browser_alive(driver):
+                            return False
+                        img = driver.find_element(By.ID, "imgCaptcha_new")
+                        if not img.is_displayed():
+                            return False
+                        current_src = img.get_attribute("src")
+                        if not current_src:
+                            return False
+                        # Do not OCR until the image actually changes from the first-try captcha
+                        if baseline_src is not None and current_src == baseline_src:
+                            return False
+                        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+                        return natural_width > 0
+                    except Exception:
+                        return False
+
+                # If we have no baseline, only wait for a loaded image (last resort)
+                def captcha_ready_fallback_any_loaded(driver):
                     try:
                         try:
                             driver.find_element(By.ID, "ddlFromYear1")
@@ -1282,10 +1326,16 @@ def run_scraper_for_year(year, window_position):
                 try:
                     if attempt == 1:
                         safe_print_func(
-                            f"[CAPTCHA] Second try: waiting for the real captcha image to appear "
-                            f"(after first try; timeout {MAX_CAPTCHA_WAIT}s)..."
+                            f"[CAPTCHA] Second try: waiting until captcha image changes (not the same as before first try) "
+                            f"— timeout {MAX_CAPTCHA_WAIT}s..."
                         )
-                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
+                        if baseline_src is not None:
+                            WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_new_image_after_dummy)
+                        else:
+                            safe_print_func(
+                                "[CAPTCHA] Second try: (fallback) waiting for any loaded captcha image..."
+                            )
+                            WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_fallback_any_loaded)
                     else:
                         safe_print_func(
                             f"[CAPTCHA] Second try: waiting for new real captcha image after mini first try "
@@ -1361,10 +1411,10 @@ def run_scraper_for_year(year, window_position):
         
         return False
     
-    def solve_captcha_with_capsolver_and_submit(driver, wait, safe_print_func, captcha_image_path):
-        """Second try using CapSolver API, after submit_dummy_captcha did first try (dummy=1).
+    def solve_captcha_with_capsolver_and_submit(driver, wait, safe_print_func, captcha_image_path, src_before_dummy_submit=None):
+        """Second try (CapSolver): wait until captcha image changes after first try, then API + submit.
 
-        Same pattern as OCR: first try = 1, second try = real value from CapSolver.
+        src_before_dummy_submit: img src from submit_dummy_captcha *before* clicking Search with "1".
         """
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1373,11 +1423,24 @@ def run_scraper_for_year(year, window_position):
                     return False
 
                 cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
-                try:
-                    img_elem = driver.find_element(By.ID, "imgCaptcha_new")
-                    old_captcha_src = img_elem.get_attribute("src")
-                except Exception:
-                    old_captcha_src = None
+                old_captcha_src = None
+                baseline_src = None
+                if attempt == 1:
+                    baseline_src = src_before_dummy_submit
+                    if baseline_src is None:
+                        try:
+                            baseline_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src")
+                            safe_print_func(
+                                "[CAPTCHA API] Second try: no src from first try — using current img src as baseline until it changes."
+                            )
+                        except Exception:
+                            baseline_src = None
+                else:
+                    try:
+                        img_elem = driver.find_element(By.ID, "imgCaptcha_new")
+                        old_captcha_src = img_elem.get_attribute("src")
+                    except Exception:
+                        old_captcha_src = None
 
                 if attempt > 1:
                     safe_print_func(
@@ -1409,7 +1472,28 @@ def run_scraper_for_year(year, window_position):
                     except Exception:
                         return False
 
-                def captcha_ready_after_first_dummy(driver):
+                def captcha_ready_new_image_capsolver(driver):
+                    try:
+                        try:
+                            driver.find_element(By.ID, "ddlFromYear1")
+                        except NoSuchElementException:
+                            return False
+                        if not is_browser_alive(driver):
+                            return False
+                        img = driver.find_element(By.ID, "imgCaptcha_new")
+                        if not img.is_displayed():
+                            return False
+                        current_src = img.get_attribute("src")
+                        if not current_src:
+                            return False
+                        if baseline_src is not None and current_src == baseline_src:
+                            return False
+                        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+                        return natural_width > 0
+                    except Exception:
+                        return False
+
+                def captcha_ready_fallback_any_loaded_capsolver(driver):
                     try:
                         try:
                             driver.find_element(By.ID, "ddlFromYear1")
@@ -1431,10 +1515,14 @@ def run_scraper_for_year(year, window_position):
                 try:
                     if attempt == 1:
                         safe_print_func(
-                            f"[CAPTCHA API] Second try (CapSolver): waiting for real captcha image after first try "
+                            f"[CAPTCHA API] Second try (CapSolver): waiting until captcha image changes "
                             f"(timeout {MAX_CAPTCHA_WAIT}s)..."
                         )
-                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
+                        if baseline_src is not None:
+                            WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_new_image_capsolver)
+                        else:
+                            safe_print_func("[CAPTCHA API] Second try (CapSolver): (fallback) waiting for loaded image...")
+                            WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_fallback_any_loaded_capsolver)
                     else:
                         safe_print_func(
                             f"[CAPTCHA API] Second try (CapSolver): waiting for new image after mini first try "
@@ -1673,10 +1761,14 @@ def run_scraper_for_year(year, window_position):
         
         return False
     
-    def wait_for_results(driver):
+    def wait_for_results(driver, timeout_seconds=40):
+        """After captcha/search submit: wait up to `timeout_seconds` for grid or message; only then NO_LOAD if still nothing."""
         try:
-            # If HAS_DATA/NO_RECORDS doesn't appear quickly, treat as NO_LOAD.
-            WebDriverWait(driver, 5).until(
+            safe_print(
+                f"[RESULTS] Waiting up to {timeout_seconds}s after captcha for RegistrationGrid or lblMsgCTS1 "
+                f"(NO_LOAD only if nothing appears in this window)..."
+            )
+            WebDriverWait(driver, timeout_seconds).until(
                 lambda d: d.find_elements(By.ID, "RegistrationGrid") or d.find_elements(By.ID, "lblMsgCTS1")
             )
             
@@ -2068,11 +2160,13 @@ def run_scraper_for_year(year, window_position):
                     raise RuntimeError(f"Failed to enter gut number {meta['property_no']}")
                 
                 # For fresh session, we need to do dummy captcha submission first
-                captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                captcha_elem, src_before_dummy = submit_dummy_captcha(driver, wait, safe_print)
                 if captcha_elem is None:
                     raise RuntimeError("Failed to submit dummy captcha")
                 
-                captcha_success = solve_captcha_with_api_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH)
+                captcha_success = solve_captcha_with_api_and_submit(
+                    driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                )
                 if not captcha_success:
                     raise RuntimeError(f"Failed to solve captcha for gut {meta['property_no']}")
                 
@@ -2097,10 +2191,12 @@ def run_scraper_for_year(year, window_position):
                     select_dropdown_safe(driver, "ddlvillage", meta['v_val'])
                     if not enter_gut_number(driver, wait, meta['property_no']):
                         raise RuntimeError(f"Failed to enter gut number {meta['property_no']} before CapSolver")
-                    captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                    captcha_elem, src_before_dummy = submit_dummy_captcha(driver, wait, safe_print)
                     if captcha_elem is None:
                         raise RuntimeError("Failed to submit dummy captcha before CapSolver")
-                    if not solve_captcha_with_capsolver_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH):
+                    if not solve_captcha_with_capsolver_and_submit(
+                        driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                    ):
                         raise RuntimeError(f"CapSolver captcha failed for gut {meta['property_no']}")
                     status = wait_for_results(driver)
                     norm_resume = (str(status) if status is not None else "").strip().upper().replace(" ", "_")
@@ -2289,89 +2385,101 @@ def run_scraper_for_year(year, window_position):
             safe_print(f"[VALIDATION ERROR] Failed to validate page {expected_page}: {e}")
             return False
     
-    def process_indexii_buttons(driver, wait, initial_buttons, meta, page_label, suffix):
+    def _save_indexii_html(driver, meta, page_label, idx, suffix, seen_docs):
+        """Read current window HTML, dedupe, save. Returns True if saved."""
+        WebDriverWait(driver, POPUP_TIMEOUT).until(
+            lambda d: d.execute_script("return document.readyState;") == "complete"
+        )
+        time.sleep(0.5)
+        html_content = driver.page_source
+        content_hash = hashlib.sha256(html_content.encode("utf-8")).hexdigest()
+        village_hash = _village_hash(meta)
+        village_seen = seen_docs.get(village_hash, set())
+        if content_hash in village_seen:
+            safe_print(
+                f"[DEDUPLICATE] Skipping - HTML matches already downloaded doc in this village (row {idx})"
+            )
+            return False
+        if save_html(html_content, meta, page_label, idx, suffix):
+            village_seen.add(content_hash)
+            seen_docs[village_hash] = village_seen
+            add_seen_doc(village_hash, content_hash)
+            global_counter["total_records"] += 1
+            safe_print(f"[SUCCESS] Saved record {idx} on page {page_label}")
+            return True
+        return False
+
+    def _process_indexii_sequential_popups(driver, wait, initial_buttons, meta, page_label, suffix, main_window):
+        """One IndexII click → one popup → save HTML → close (VPS and non-VPS)."""
         saved_count = 0
-        main_window = driver.current_window_handle
         total_buttons = len(initial_buttons)
-        seen_docs = meta.get('seen_docs_dict', {})
-        
+        seen_docs = meta.get("seen_docs_dict", {})
+        safe_print("[INDEXII] One IndexII button at a time → popup → save → close.")
+
         for idx in range(1, total_buttons + 1):
             try:
                 safe_print(f"[PROCESSING] IndexII {idx}/{total_buttons} on page {page_label}")
-                
+
                 if idx > 1:
                     try:
                         time.sleep(0.5)
                         buttons = driver.find_elements(By.XPATH, "//input[@value='IndexII']")
                         if not buttons or len(buttons) < idx:
-                            safe_print(f"[INDEXII WARN] Could not find IndexII button {idx}, only {len(buttons) if buttons else 0} buttons available")
+                            safe_print(
+                                f"[INDEXII WARN] Could not find IndexII button {idx}, only "
+                                f"{len(buttons) if buttons else 0} buttons available"
+                            )
                             break
                     except Exception as e:
                         safe_print(f"[INDEXII ERROR] Failed to re-locate buttons: {e}")
                         break
-                
+
                 if idx == 1:
-                    button = initial_buttons[idx-1]
+                    button = initial_buttons[idx - 1]
                 else:
-                    button = buttons[idx-1]
+                    button = buttons[idx - 1]
 
                 driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
                 time.sleep(0.5)
                 button.click()
                 safe_print(f"[INFO] Clicked IndexII button {idx}")
-                
+
                 WebDriverWait(driver, POPUP_TIMEOUT).until(EC.number_of_windows_to_be(2))
-                
+
                 new_windows = [w for w in driver.window_handles if w != main_window]
                 if not new_windows:
                     raise TimeoutException("No new window opened")
-                
+
                 driver.switch_to.window(new_windows[0])
                 safe_print(f"[INFO] Switched to IndexII popup window")
-                
-                WebDriverWait(driver, POPUP_TIMEOUT).until(
-                    lambda d: d.execute_script("return document.readyState;") == "complete"
-                )
-                time.sleep(1)
-                
-                html_content = driver.page_source
-                
-                # Deduplication by exact HTML content match (per village)
-                content_hash = hashlib.sha256(html_content.encode('utf-8')).hexdigest()
-                village_hash = _village_hash(meta)
-                village_seen = seen_docs.get(village_hash, set())
-                if content_hash in village_seen:
-                    safe_print(f"[DEDUPLICATE] Skipping - HTML content exactly matches already downloaded doc in this village (row {idx})")
-                    driver.close()
-                    driver.switch_to.window(main_window)
-                    continue
-                
-                if save_html(html_content, meta, page_label, idx, suffix):
-                    village_seen.add(content_hash)
-                    seen_docs[village_hash] = village_seen
-                    add_seen_doc(village_hash, content_hash)
+
+                if _save_indexii_html(driver, meta, page_label, idx, suffix, seen_docs):
                     saved_count += 1
-                    global_counter["total_records"] += 1
-                    safe_print(f"[SUCCESS] Saved record {idx} on page {page_label}")
-                
+
                 driver.close()
                 driver.switch_to.window(main_window)
                 safe_print(f"[INFO] Closed popup and returned to main window")
-                
+
             except Exception as e:
                 safe_print(f"[INDEXII ERROR] Failed to process record {idx}: {e}")
-                
+
                 try:
                     for window in driver.window_handles:
                         if window != main_window:
                             driver.switch_to.window(window)
                             driver.close()
                     driver.switch_to.window(main_window)
-                except:
+                except Exception:
                     pass
-        
-        safe_print(f"[INDEXII COMPLETE] Processed {saved_count}/{total_buttons} records on page {page_label}")
+
+        safe_print(f"[INDEXII COMPLETE] Processed {saved_count}/{total_buttons} on page {page_label}")
         return saved_count
+
+    def process_indexii_buttons(driver, wait, initial_buttons, meta, page_label, suffix):
+        main_window = driver.current_window_handle
+        return _process_indexii_sequential_popups(
+            driver, wait, initial_buttons, meta, page_label, suffix, main_window
+        )
     
     def process_single_page_data(driver, wait, meta, suffix):
         safe_print("[SINGLE PAGE] Processing page without pagination")
@@ -2551,7 +2659,7 @@ def run_scraper_for_year(year, window_position):
                     return 0
                 
                 # Submit dummy captcha first to trigger actual captcha
-                captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                captcha_elem, src_before_dummy = submit_dummy_captcha(driver, wait, safe_print)
                 if captcha_elem is None:
                     safe_print(f"[GUT ERROR] Failed to submit dummy captcha for gut {gut_no}")
                     if attempt < MAX_SESSION_RETRY:
@@ -2559,8 +2667,10 @@ def run_scraper_for_year(year, window_position):
                     log_message("ERROR", "DUMMY_CAPTCHA", f"Failed to submit dummy captcha for gut {gut_no}", meta)
                     return 0
                 
-                # Now solve the actual captcha
-                captcha_success = solve_captcha_with_api_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH)
+                # Now solve the actual captcha (wait for NEW image vs src_before_dummy, then OCR)
+                captcha_success = solve_captcha_with_api_and_submit(
+                    driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                )
                 if not captcha_success:
                     safe_print(f"[GUT ERROR] Captcha failed for gut {gut_no}")
                     if attempt < MAX_SESSION_RETRY:
@@ -2605,13 +2715,15 @@ def run_scraper_for_year(year, window_position):
                         if attempt < MAX_SESSION_RETRY:
                             continue
                         return 0
-                    captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                    captcha_elem, src_before_dummy = submit_dummy_captcha(driver, wait, safe_print)
                     if captcha_elem is None:
                         safe_print(f"[GUT ERROR] Dummy captcha failed before CapSolver")
                         if attempt < MAX_SESSION_RETRY:
                             continue
                         return 0
-                    if not solve_captcha_with_capsolver_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH):
+                    if not solve_captcha_with_capsolver_and_submit(
+                        driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                    ):
                         safe_print(f"[GUT ERROR] CapSolver captcha failed for gut {gut_no}")
                         if attempt < MAX_SESSION_RETRY:
                             continue
@@ -2839,6 +2951,11 @@ def run_scraper_for_year(year, window_position):
                 
                 villages_state = {}
                 for v_idx, (v_name, v_val) in enumerate(village_options, start=1):
+                    if MIN_VILLAGE_INDEX and v_idx < MIN_VILLAGE_INDEX:
+                        safe_print(
+                            f"[VILLAGE FILTER] MIN_VILLAGE_INDEX={MIN_VILLAGE_INDEX}, skipping village #{v_idx}: {v_name}"
+                        )
+                        continue
                     if ONLY_VILLAGE_INDEX and v_idx != ONLY_VILLAGE_INDEX:
                         continue
                     if ONLY_VILLAGE_INDEX:

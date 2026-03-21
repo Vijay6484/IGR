@@ -4,18 +4,21 @@ Run the IGR scraper in VPS/headless mode by default and only process:
   - 1st district  (dropdown index 1)
   - 12th tehsil   (dropdown index 12)
 
-All villages in that tehsil are processed unless ONLY_VILLAGE_INDEX is set in the environment.
+Villages from the 3rd onward in the dropdown are processed (MIN_VILLAGE_INDEX=3). Override with
+  MIN_VILLAGE_INDEX=1 for all villages, or set ONLY_VILLAGE_INDEX for a single village.
 
 Captcha flow (same as 1.py — watch the terminal):
-  1) First try: enter "1" in the captcha box and submit (dummy; not the real code).
-  2) Second try: the page shows another captcha — solve with OCR (Tesseract/Paddle) and submit the real value.
+  1) First try: enter "1" and click Search; the script waits until the captcha image URL changes.
+  2) Second try: only then OCR reads the NEW image and submits the real value (never OCRs the pre-"1" image).
+  After second try, results wait up to 40s before NO_LOAD is decided.
+  Index II: one document per click (popup → save → close).
   If NO_LOAD after that: repeat full form, first try = 1 again, second try = CapSolver API.
   If still NO_LOAD: next property number (gut).
 
 Set VPS_MODE=0 before running for a visible browser (local debugging).
 
 Equivalent (default headless):
-  VPS_MODE=1 ONLY_DISTRICT_INDEX=1 ONLY_TAHSIL_INDEX=12 python3 1.py <year>
+  VPS_MODE=1 ONLY_DISTRICT_INDEX=1 ONLY_TAHSIL_INDEX=12 MIN_VILLAGE_INDEX=3 python3 1.py <year>
 """
 import os
 import sys
@@ -37,17 +40,19 @@ def main():
         env["VPS_MODE"] = "1"
     env["ONLY_DISTRICT_INDEX"] = "1"
     env["ONLY_TAHSIL_INDEX"] = "12"
+    # Start at 3rd village in the dropdown (skip villages 1 and 2)
+    if not str(env.get("MIN_VILLAGE_INDEX", "")).strip():
+        env["MIN_VILLAGE_INDEX"] = "1"
 
     mode = "headless (VPS)" if env.get("VPS_MODE", "").lower() in ("1", "true", "yes") else "visible"
     print(
         f"[run_first_district_12th_tahsil] Year: {year}, {mode}, "
-        "ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12"
+        "ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12, MIN_VILLAGE_INDEX="
+        f"{env.get('MIN_VILLAGE_INDEX', '1')}"
     )
     print(
-        "[run_first_district_12th_tahsil] Captcha terminal flow: "
-        '(1) First try — enter "1" and submit. '
-        "(2) Second try — OCR reads the new captcha, submit the real value. "
-        "If NO_LOAD: repeat with CapSolver for second try; still NO_LOAD → next gut."
+        "[run_first_district_12th_tahsil] Captcha: (1) First try — enter 1, submit, WAIT until image changes. "
+        "(2) Second try — OCR/CapSolver on the NEW image only. NO_LOAD → CapSolver path; still NO_LOAD → next gut."
     )
     rc = subprocess.run([sys.executable, one_py, year], env=env, cwd=script_dir)
     sys.exit(rc.returncode)
