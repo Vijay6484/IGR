@@ -38,6 +38,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from captcha_config import CAPTCHA_API_KEY, CAPTCHA_API_URL, CAPTCHA_RESULT_URL, MAX_CAPTCHA_WAIT
 from local_captcha_solver import solve_captcha_with_tesseract_from_driver
+from paddleocr_solver import solve_captcha_with_paddle_from_driver
 
 # Load environment variables from .env (if present)
 try:
@@ -625,6 +626,16 @@ def run_scraper_for_year(year, window_position):
         ONLY_VILLAGE_INDEX = int(os.environ.get("ONLY_VILLAGE_INDEX", "").strip() or "0")
     except ValueError:
         ONLY_VILLAGE_INDEX = 0
+
+    # Optional: restrict to one district / tahsil by 1-based dropdown index (like ONLY_VILLAGE_INDEX).
+    try:
+        ONLY_DISTRICT_INDEX = int(os.environ.get("ONLY_DISTRICT_INDEX", "").strip() or "0")
+    except ValueError:
+        ONLY_DISTRICT_INDEX = 0
+    try:
+        ONLY_TAHSIL_INDEX = int(os.environ.get("ONLY_TAHSIL_INDEX", "").strip() or "0")
+    except ValueError:
+        ONLY_TAHSIL_INDEX = 0
 
     # Google Drive uploader (optional)
     drive_uploader = None
@@ -1243,11 +1254,18 @@ def run_scraper_for_year(year, window_position):
                     
                     if not is_browser_alive(driver):
                         return False
-                        
-                    # Solve captcha locally using Tesseract (no screenshot file needed)
-                    possible_solutions = solve_captcha_with_tesseract_from_driver(driver, img_id="imgCaptcha_new")
+
+                    # Solve captcha locally using selected OCR engine
+                    solver = os.environ.get("CAPTCHA_SOLVER", "tesseract").strip().lower()
+                    if solver == "paddle":
+                        safe_print_func("[CAPTCHA] Using PaddleOCR solver")
+                        possible_solutions = solve_captcha_with_paddle_from_driver(driver, img_id="imgCaptcha_new")
+                    else:
+                        safe_print_func("[CAPTCHA] Using Tesseract solver")
+                        possible_solutions = solve_captcha_with_tesseract_from_driver(driver, img_id="imgCaptcha_new")
+
                     if possible_solutions is None:
-                        safe_print_func("[CAPTCHA OCR ERROR] Failed to solve captcha with Tesseract")
+                        safe_print_func("[CAPTCHA OCR ERROR] Failed to solve captcha with selected solver")
                         if attempt < max_attempts:
                             continue
                         return False
@@ -2495,6 +2513,9 @@ def run_scraper_for_year(year, window_position):
         for d_idx, (d_name, d_val) in enumerate(district_options, start=1):
             if os.path.exists(STOP_FILE):
                 break
+            if ONLY_DISTRICT_INDEX and d_idx != ONLY_DISTRICT_INDEX:
+                safe_print(f"[DISTRICT FILTER] ONLY_DISTRICT_INDEX={ONLY_DISTRICT_INDEX}, skipping district #{d_idx}: {d_name}")
+                continue
             if resume_from and d_name != resume_from.get("district_name"):
                 safe_print(f"[RESUME] Skipping district {d_name} (resume at {resume_from.get('district_name')})")
                 continue
@@ -2518,6 +2539,9 @@ def run_scraper_for_year(year, window_position):
             for t_idx, (t_name, t_val) in enumerate(tahsil_options, start=1):
                 if os.path.exists(STOP_FILE):
                     break
+                if ONLY_TAHSIL_INDEX and t_idx != ONLY_TAHSIL_INDEX:
+                    safe_print(f"[TAHSIL FILTER] ONLY_TAHSIL_INDEX={ONLY_TAHSIL_INDEX}, skipping tahsil #{t_idx}: {t_name}")
+                    continue
                 if resume_from and (d_name != resume_from.get("district_name") or t_name != resume_from.get("tahsil_name")):
                     safe_print(f"[RESUME] Skipping tahsil {t_name}")
                     continue
