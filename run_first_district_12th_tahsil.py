@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Run the IGR scraper in non-VPS mode (visible browser) and only process:
+Run the IGR scraper in VPS/headless mode by default and only process:
   - 1st district  (dropdown index 1)
   - 12th tehsil   (dropdown index 12)
 
 All villages in that tehsil are processed unless ONLY_VILLAGE_INDEX is set in the environment.
 
-Equivalent:
-  VPS_MODE=0 ONLY_DISTRICT_INDEX=1 ONLY_TAHSIL_INDEX=12 python3 1.py <year>
+Set VPS_MODE=0 before running for a visible browser (local debugging).
+
+Equivalent (default headless):
+  VPS_MODE=1 ONLY_DISTRICT_INDEX=1 ONLY_TAHSIL_INDEX=12 python3 1.py <year>
 """
 import os
 import sys
@@ -24,13 +26,16 @@ def main():
     year = sys.argv[1] if len(sys.argv) > 1 else "2026"
 
     env = os.environ.copy()
-    env["VPS_MODE"] = "0"
+    # Headless Chrome on Linux/VPS (same as run_year.py). Override with VPS_MODE=0 for visible UI.
+    if not str(env.get("VPS_MODE", "")).strip():
+        env["VPS_MODE"] = "1"
     env["ONLY_DISTRICT_INDEX"] = "1"
     env["ONLY_TAHSIL_INDEX"] = "12"
 
+    mode = "headless (VPS)" if env.get("VPS_MODE", "").lower() in ("1", "true", "yes") else "visible"
     print(
-        f"[run_first_district_12th_tahsil] Year: {year}, "
-        "non-VPS, ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12"
+        f"[run_first_district_12th_tahsil] Year: {year}, {mode}, "
+        "ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12"
     )
     rc = subprocess.run([sys.executable, one_py, year], env=env, cwd=script_dir)
     sys.exit(rc.returncode)
