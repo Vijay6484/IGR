@@ -9,6 +9,9 @@ All villages in that tehsil are processed unless ONLY_VILLAGE_INDEX is set in th
 Captcha (handled inside 1.py — no extra flags needed):
   - First captcha: always submit "1" (submit_dummy_captcha).
   - Second step: wait for the real image, then OCR (Tesseract/Paddle via CAPTCHA_SOLVER) and submit.
+  - If NO_LOAD after OCR: form reload, again first=1 then CapSolver (captcha_config) for the second captcha.
+  - If still NO_LOAD after CapSolver: skip to the next property number (gut).
+  - Terminal: lines tagged [TRACK] show OCR → CapSolver flow (no extra log-file entries for tracking).
 
 Set VPS_MODE=0 before running for a visible browser (local debugging).
 
@@ -41,7 +44,7 @@ def main():
         f"[run_first_district_12th_tahsil] Year: {year}, {mode}, "
         "ONLY_DISTRICT_INDEX=1, ONLY_TAHSIL_INDEX=12"
     )
-    print("[run_first_district_12th_tahsil] Captcha: first submit=1, then OCR (1.py)")
+    print("[run_first_district_12th_tahsil] Captcha: first=1, then OCR; NO_LOAD→CapSolver; still NO_LOAD→next gut")
     rc = subprocess.run([sys.executable, one_py, year], env=env, cwd=script_dir)
     sys.exit(rc.returncode)
 

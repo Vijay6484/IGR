@@ -37,7 +37,7 @@ from selenium.common.exceptions import (
 from webdriver_manager.chrome import ChromeDriverManager
 
 from captcha_config import CAPTCHA_API_KEY, CAPTCHA_API_URL, CAPTCHA_RESULT_URL, MAX_CAPTCHA_WAIT
-from local_captcha_solver import solve_captcha_with_tesseract_from_driver
+from local_captcha_solver import solve_captcha_with_tesseract_from_driver, save_captcha_png_from_driver
 from paddleocr_solver import solve_captcha_with_paddle_from_driver
 
 # Load environment variables from .env (if present)
@@ -1349,6 +1349,146 @@ def run_scraper_for_year(year, window_position):
         
         return False
     
+    def solve_captcha_with_capsolver_and_submit(driver, wait, safe_print_func, captcha_image_path):
+        """Second captcha step using CapSolver (ImageToTextTask), after submit_dummy_captcha entered 1.
+
+        Same two-step pattern as OCR: wait for the real captcha, then solve via API and submit.
+        Retries use the same \"enter 1 then wait for new image\" flow as the OCR solver.
+        """
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if not is_browser_alive(driver):
+                    return False
+
+                cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
+                try:
+                    img_elem = driver.find_element(By.ID, "imgCaptcha_new")
+                    old_captcha_src = img_elem.get_attribute("src")
+                except Exception:
+                    old_captcha_src = None
+
+                if attempt > 1:
+                    safe_print_func(f"[CAPTCHA API] Retry {attempt}/{max_attempts}: entering 1 to refresh captcha")
+                    driver.execute_script("arguments[0].value='1';", cap_input)
+                    driver.find_element(By.ID, "btnSearch_RestMaha").click()
+                    time.sleep(0.5)
+
+                def captcha_ready_after_refresh_submit(driver):
+                    try:
+                        try:
+                            driver.find_element(By.ID, "ddlFromYear1")
+                        except NoSuchElementException:
+                            return False
+                        if not is_browser_alive(driver):
+                            return False
+                        img = driver.find_element(By.ID, "imgCaptcha_new")
+                        if not img.is_displayed():
+                            return False
+                        current_src = img.get_attribute("src")
+                        if old_captcha_src and current_src == old_captcha_src:
+                            return False
+                        if not current_src:
+                            return False
+                        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+                        return natural_width > 0
+                    except Exception:
+                        return False
+
+                def captcha_ready_after_first_dummy(driver):
+                    try:
+                        try:
+                            driver.find_element(By.ID, "ddlFromYear1")
+                        except NoSuchElementException:
+                            return False
+                        if not is_browser_alive(driver):
+                            return False
+                        img = driver.find_element(By.ID, "imgCaptcha_new")
+                        if not img.is_displayed():
+                            return False
+                        current_src = img.get_attribute("src")
+                        if not current_src:
+                            return False
+                        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+                        return natural_width > 0
+                    except Exception:
+                        return False
+
+                try:
+                    if attempt == 1:
+                        safe_print_func(
+                            f"[CAPTCHA API] Second step — waiting for captcha image after first submit=1 "
+                            f"(attempt {attempt}/{max_attempts}, timeout: {MAX_CAPTCHA_WAIT}s)..."
+                        )
+                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
+                    else:
+                        safe_print_func(
+                            f"[CAPTCHA API] Waiting for new captcha after refresh (attempt {attempt}/{max_attempts}, "
+                            f"timeout: {MAX_CAPTCHA_WAIT}s)..."
+                        )
+                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_refresh_submit)
+                    time.sleep(1)
+
+                    if not is_browser_alive(driver):
+                        return False
+
+                    # Save PNG for CapSolver and call API
+                    try:
+                        save_captcha_png_from_driver(driver, captcha_image_path, img_id="imgCaptcha_new")
+                    except Exception as e:
+                        safe_print_func(f"[CAPTCHA API] Failed to save captcha image: {e}")
+                        if attempt < max_attempts:
+                            continue
+                        return False
+
+                    # Use configured key (may be empty; solve_captcha_with_api handles failure)
+                    if not (CAPTCHA_API_KEY or "").strip():
+                        safe_print_func("[CAPTCHA API] CAPTCHA_API_KEY not set in captcha_config.py")
+                        return False
+
+                    safe_print_func("[CAPTCHA API] Solving captcha via CapSolver...")
+                    possible_solutions = solve_captcha_with_api(captcha_image_path, CAPTCHA_API_KEY)
+                    if possible_solutions is None:
+                        safe_print_func("[CAPTCHA API] CapSolver did not return a solution")
+                        if attempt < max_attempts:
+                            continue
+                        return False
+
+                    for i, captcha_text in enumerate(possible_solutions):
+                        safe_print_func(f"[CAPTCHA API] Trying solution {i+1}/{len(possible_solutions)}: {captcha_text}")
+                        if not is_browser_alive(driver):
+                            return False
+                        cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
+                        driver.execute_script(f"arguments[0].value='{captcha_text}';", cap_input)
+                        driver.find_element(By.ID, "btnSearch_RestMaha").click()
+                        time.sleep(2)
+                        try:
+                            error_msg = driver.find_element(By.ID, "lblMsgCTS1").text
+                            if "Invalid Captcha" in error_msg or "wrong captcha" in error_msg.lower():
+                                safe_print_func(f"[CAPTCHA API] Solution {captcha_text} was incorrect")
+                                continue
+                            else:
+                                safe_print_func(f"[CAPTCHA API] Solved and submitted: {captcha_text}")
+                                return True
+                        except NoSuchElementException:
+                            safe_print_func(f"[CAPTCHA API] Solved and submitted: {captcha_text}")
+                            return True
+
+                except TimeoutException:
+                    safe_print_func(f"[CAPTCHA API] Timeout waiting for captcha image (attempt {attempt}/{max_attempts})")
+                    if attempt < max_attempts:
+                        continue
+                    return False
+
+            except Exception as e:
+                safe_print_func(f"[CAPTCHA API ERROR] Exception during CapSolver captcha (attempt {attempt}/{max_attempts}): {e}")
+                if attempt < max_attempts:
+                    time.sleep(2)
+                    continue
+                return False
+
+        return False
+    
     # Continue with the rest of the browser functions
     def get_dropdown_options_safe(driver, select_id, max_retries=10):
         for attempt in range(1, max_retries + 1):
@@ -1912,6 +2052,33 @@ def run_scraper_for_year(year, window_position):
                     raise RuntimeError(f"Failed to solve captcha for gut {meta['property_no']}")
                 
                 status = wait_for_results(driver)
+                if status == "NO_LOAD":
+                    safe_print("[RESUME] NO_LOAD after OCR captcha; reloading form and using CapSolver...")
+                    safe_print(
+                        f"[TRACK] resume gut={meta['property_no']} phase=no_load→capsolver "
+                        f"target_page={target_page}"
+                    )
+                    if not safe_get_url(driver, WEBSITE_URL):
+                        raise RuntimeError("Failed to reload website for CapSolver resume")
+                    driver, wait = close_popup_and_click_rest(driver, wait)
+                    Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(meta['year'])
+                    select_dropdown_safe(driver, "ddlDistrict1", meta['d_val'])
+                    wait_for_dropdown_population(driver, "ddltahsil")
+                    select_dropdown_safe(driver, "ddltahsil", meta['t_val'])
+                    wait_for_dropdown_population(driver, "ddlvillage")
+                    select_dropdown_safe(driver, "ddlvillage", meta['v_val'])
+                    if not enter_gut_number(driver, wait, meta['property_no']):
+                        raise RuntimeError(f"Failed to enter gut number {meta['property_no']} before CapSolver")
+                    captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                    if captcha_elem is None:
+                        raise RuntimeError("Failed to submit dummy captcha before CapSolver")
+                    if not solve_captcha_with_capsolver_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH):
+                        raise RuntimeError(f"CapSolver captcha failed for gut {meta['property_no']}")
+                    status = wait_for_results(driver)
+                    norm_resume = (str(status) if status is not None else "").strip().upper().replace(" ", "_")
+                    safe_print(
+                        f"[TRACK] resume gut={meta['property_no']} phase=after_capsolver norm={norm_resume}"
+                    )
                 if status != "HAS_DATA":
                     raise RuntimeError(f"No data found after resuming, status: {status}")
                 
@@ -2301,8 +2468,9 @@ def run_scraper_for_year(year, window_position):
     
     def process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page=1):
         gut_no = meta['property_no']
-        retried_no_load = False
         for attempt in range(1, MAX_SESSION_RETRY + 1):
+            # Per session attempt: OCR first; on NO_LOAD, try CapSolver once (first=1, then API).
+            tried_capsolver_after_no_load = False
             try:
                 safe_print(f"[GUT {gut_no}] Processing gut {gut_no} (attempt {attempt}/{MAX_SESSION_RETRY})")
                 
@@ -2375,6 +2543,59 @@ def run_scraper_for_year(year, window_position):
                 result_status = wait_for_results(driver)
                 norm_status = (str(result_status) if result_status is not None else "").strip().upper().replace(" ", "_")
                 safe_print(f"[GUT {gut_no}] Search result: {result_status} (norm={norm_status})")
+                safe_print(
+                    f"[TRACK] gut={gut_no} phase=after_ocr_captcha norm={norm_status} "
+                    f"attempt={attempt}/{MAX_SESSION_RETRY} year={meta.get('year')} "
+                    f"district={meta.get('district')} village={meta.get('village')}"
+                )
+
+                # NO_LOAD after OCR: reload form, first captcha=1, second captcha via CapSolver
+                if norm_status == "NO_LOAD" and not tried_capsolver_after_no_load:
+                    tried_capsolver_after_no_load = True
+                    safe_print(
+                        f"[GUT {gut_no}] NO_LOAD after OCR; reloading form and solving second captcha with CapSolver..."
+                    )
+                    safe_print(
+                        f"[TRACK] gut={gut_no} phase=no_load→capsolver action=reload_form+solve_api "
+                        f"attempt={attempt}/{MAX_SESSION_RETRY}"
+                    )
+                    if not safe_get_url(driver, WEBSITE_URL):
+                        safe_print(f"[GUT ERROR] Failed to reload website for CapSolver retry (attempt {attempt})")
+                        if attempt < MAX_SESSION_RETRY:
+                            continue
+                        return 0
+                    driver, wait = close_popup_and_click_rest(driver, wait)
+                    Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(meta['year'])
+                    select_dropdown_safe(driver, "ddlDistrict1", meta['d_val'])
+                    wait_for_dropdown_population(driver, "ddltahsil")
+                    select_dropdown_safe(driver, "ddltahsil", meta['t_val'])
+                    reset_village_dropdown(driver, wait)
+                    select_dropdown_safe(driver, "ddlvillage", meta['v_val'])
+                    if not enter_gut_number(driver, wait, gut_no):
+                        safe_print(f"[GUT ERROR] Failed to re-enter gut after CapSolver reload")
+                        if attempt < MAX_SESSION_RETRY:
+                            continue
+                        return 0
+                    captcha_elem = submit_dummy_captcha(driver, wait, safe_print)
+                    if captcha_elem is None:
+                        safe_print(f"[GUT ERROR] Dummy captcha failed before CapSolver")
+                        if attempt < MAX_SESSION_RETRY:
+                            continue
+                        return 0
+                    if not solve_captcha_with_capsolver_and_submit(driver, wait, safe_print, CAPTCHA_IMAGE_PATH):
+                        safe_print(f"[GUT ERROR] CapSolver captcha failed for gut {gut_no}")
+                        if attempt < MAX_SESSION_RETRY:
+                            continue
+                        log_message("ERROR", "CAPTCHA", f"CapSolver captcha failed for gut {gut_no}", meta)
+                        return 0
+                    result_status = wait_for_results(driver)
+                    norm_status = (str(result_status) if result_status is not None else "").strip().upper().replace(" ", "_")
+                    safe_print(f"[GUT {gut_no}] Search result after CapSolver: {result_status} (norm={norm_status})")
+                    safe_print(
+                        f"[TRACK] gut={gut_no} phase=after_capsolver norm={norm_status} "
+                        f"attempt={attempt}/{MAX_SESSION_RETRY} year={meta.get('year')} "
+                        f"district={meta.get('district')} village={meta.get('village')}"
+                    )
                 
                 if norm_status == "HAS_DATA":
                     saved_count = scrape_all_pages_for_gut(driver, wait, meta, suffix, resume_from_page)
@@ -2387,34 +2608,21 @@ def run_scraper_for_year(year, window_position):
                     log_message("INFO", "NO_RECORDS", f"No records found for gut {gut_no}", meta)
                     return 0
                 elif norm_status == "NO_LOAD":
-                    # If the results grid didn't load after captcha, refresh and retry THIS gut once.
-                    if not retried_no_load:
-                        retried_no_load = True
-                        safe_print(f"[GUT {gut_no}] NO_LOAD after captcha; refreshing and retrying same gut once...")
-                        try:
-                            terminate_driver_safely(driver)
-                        except Exception:
-                            pass
-                        driver, wait = safe_browser_restart()
-                        continue
-                    safe_print(f"[GUT {gut_no}] NO_LOAD persisted after retry; marking as failed/special")
-                    # For resume: set village.json lastGutNo to (gut_no - 1) so next run retries same gut.
-                    try:
-                        if DRIVE_ONLY and drive_storage:
-                            d_idx = meta.get("district_idx")
-                            t_idx = meta.get("taluka_idx")
-                            v_idx = meta.get("village_idx")
-                            if d_idx and t_idx and v_idx:
-                                v_path = [str(meta["year"]), str(d_idx), str(t_idx), str(v_idx)]
-                                v_state = drive_storage.read_json(v_path, "village.json") or {}
-                                v_state["lastGutNo"] = max(int(gut_no) - 1, 0)
-                                v_state["status"] = "ongoing"
-                                v_state["updatedAt"] = time.strftime('%Y-%m-%d %H:%M:%S')
-                                drive_storage.write_json(v_path, "village.json", v_state)
-                    except Exception as _e:
-                        safe_print(f"[GDRIVE] Failed to backtrack village.json on NO_LOAD: {_e}")
+                    # Still NO_LOAD after OCR (and CapSolver if that ran): move on to next property number.
+                    safe_print(
+                        f"[GUT {gut_no}] NO_LOAD after OCR/CapSolver; skipping to next property number"
+                    )
+                    safe_print(
+                        f"[TRACK] gut={gut_no} phase=final_no_load action=skip_to_next_property "
+                        f"tried_capsolver={tried_capsolver_after_no_load}"
+                    )
                     log_failed(meta['year'], meta['district'], meta['tahsil'], meta['village'], gut_no)
-                    log_message("WARN", "NO_LOAD", f"NO_LOAD persisted for gut {gut_no} after one refresh retry", meta)
+                    log_message(
+                        "WARN",
+                        "NO_LOAD",
+                        f"NO_LOAD for gut {gut_no} after OCR/CapSolver; proceeding to next gut",
+                        meta,
+                    )
                     return 0
                 else:
                     safe_print(f"[GUT {gut_no}] Special case: {result_status}")

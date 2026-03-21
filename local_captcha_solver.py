@@ -1,4 +1,5 @@
 import base64
+import os
 import re
 from io import BytesIO
 
@@ -51,6 +52,16 @@ def _get_captcha_png_bytes_via_canvas(driver, img_id: str = "imgCaptcha_new", ti
         raise RuntimeError("Unexpected captcha data URL format")
 
     return base64.b64decode(m.group(1))
+
+
+def save_captcha_png_from_driver(driver, path: str, img_id: str = "imgCaptcha_new") -> None:
+    """Write the current captcha image to a PNG file (for CapSolver / external APIs)."""
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    png_bytes = _get_captcha_png_bytes_via_canvas(driver, img_id=img_id)
+    with open(path, "wb") as f:
+        f.write(png_bytes)
 
 
 def _basic_cleanup(text: str) -> str:
