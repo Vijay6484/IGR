@@ -1172,7 +1172,7 @@ def run_scraper_for_year(year, window_position):
         return None
     
     def submit_dummy_captcha(driver, wait, safe_print_func):
-        """Submit dummy captcha to trigger new captcha generation"""
+        """First captcha step: always enter 1 and submit (loads the real captcha for OCR)."""
         try:
             # Find captcha input and submit button
             cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
@@ -1201,7 +1201,12 @@ def run_scraper_for_year(year, window_position):
             return None
     
     def solve_captcha_with_api_and_submit(driver, wait, safe_print_func, captcha_image_path):
-        """Solve captcha with API integration and submit form"""
+        """Second captcha step: OCR the image and submit (after submit_dummy_captcha entered 1).
+
+        Flow: submit_dummy_captcha() always enters 1 for the first captcha. This function waits for
+        the replacement captcha, solves it locally, and submits. On retries, it enters 1 again to
+        refresh the image, then solves the new captcha.
+        """
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1211,26 +1216,27 @@ def run_scraper_for_year(year, window_position):
                 # Wait for captcha input to be present
                 cap_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='Enter captcha as shown']")))
                 
-                # Get current captcha image source for comparison
+                # Snapshot current image src (for retry: after another "1" submit we wait for src change)
                 try:
                     img_elem = driver.find_element(By.ID, "imgCaptcha_new")
                     old_captcha_src = img_elem.get_attribute("src")
-                except:
+                except Exception:
                     old_captcha_src = None
-                    
-                # Submit dummy captcha to trigger new captcha
-                driver.execute_script("arguments[0].value='1';", cap_input)
-                driver.find_element(By.ID, "btnSearch_RestMaha").click()
-                
-                # Define function to check if new captcha has loaded
-                def new_captcha_loaded(driver):
+
+                if attempt > 1:
+                    # First step again: enter 1 to fetch a new captcha, then OCR below
+                    safe_print_func(f"[CAPTCHA] Retry {attempt}/{max_attempts}: entering 1 to refresh captcha")
+                    driver.execute_script("arguments[0].value='1';", cap_input)
+                    driver.find_element(By.ID, "btnSearch_RestMaha").click()
+                    time.sleep(0.5)
+
+                # After refresh "1" submit: wait until src changed and image is painted (allows data:image / base64)
+                def captcha_ready_after_refresh_submit(driver):
                     try:
-                        # Check if session is expired by looking for essential elements
                         try:
                             driver.find_element(By.ID, "ddlFromYear1")
                         except NoSuchElementException:
-                            return False  # Session expired
-                        
+                            return False
                         if not is_browser_alive(driver):
                             return False
                         img = driver.find_element(By.ID, "imgCaptcha_new")
@@ -1239,22 +1245,53 @@ def run_scraper_for_year(year, window_position):
                         current_src = img.get_attribute("src")
                         if old_captcha_src and current_src == old_captcha_src:
                             return False
-                        if not current_src or "data:image" in current_src:
+                        if not current_src:
                             return False
                         natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
                         return natural_width > 0
-                    except:
+                    except Exception:
+                        return False
+
+                # After first dummy (caller): wait for real captcha — allow data:image / base64
+                def captcha_ready_after_first_dummy(driver):
+                    try:
+                        try:
+                            driver.find_element(By.ID, "ddlFromYear1")
+                        except NoSuchElementException:
+                            return False
+                        if not is_browser_alive(driver):
+                            return False
+                        img = driver.find_element(By.ID, "imgCaptcha_new")
+                        if not img.is_displayed():
+                            return False
+                        current_src = img.get_attribute("src")
+                        if not current_src:
+                            return False
+                        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+                        return natural_width > 0
+                    except Exception:
                         return False
                 
-                # Wait for new captcha to load with extended timeout
+                # Wait for captcha to load with extended timeout
                 try:
-                    safe_print_func(f"[CAPTCHA] Waiting for new captcha to load (attempt {attempt}/3, timeout: {MAX_CAPTCHA_WAIT}s)...")
-                    WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(new_captcha_loaded)
+                    if attempt == 1:
+                        safe_print_func(
+                            f"[CAPTCHA] Second step — waiting for captcha image after first submit=1 "
+                            f"(attempt {attempt}/{max_attempts}, timeout: {MAX_CAPTCHA_WAIT}s)..."
+                        )
+                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_first_dummy)
+                    else:
+                        safe_print_func(
+                            f"[CAPTCHA] Waiting for new captcha after refresh (attempt {attempt}/{max_attempts}, "
+                            f"timeout: {MAX_CAPTCHA_WAIT}s)..."
+                        )
+                        WebDriverWait(driver, MAX_CAPTCHA_WAIT).until(captcha_ready_after_refresh_submit)
                     time.sleep(1)
                     
                     if not is_browser_alive(driver):
                         return False
 
+                    safe_print_func("[CAPTCHA] Fetching captcha image and solving (OCR)...")
                     # Solve captcha locally using selected OCR engine
                     solver = os.environ.get("CAPTCHA_SOLVER", "tesseract").strip().lower()
                     if solver == "paddle":
@@ -1298,7 +1335,7 @@ def run_scraper_for_year(year, window_position):
                             return True
                             
                 except TimeoutException:
-                    safe_print_func(f"[CAPTCHA] Timeout waiting for new captcha to load (attempt {attempt}/3)")
+                    safe_print_func(f"[CAPTCHA] Timeout waiting for captcha image (attempt {attempt}/{max_attempts})")
                     if attempt < max_attempts:
                         continue
                     return False
