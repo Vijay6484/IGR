@@ -10,6 +10,8 @@ Villages from the 3rd onward in the dropdown are processed (MIN_VILLAGE_INDEX=3)
 Captcha flow (same as 1.py — watch the terminal):
   1) First try: enter "1" and click Search; the script waits until the captcha image URL changes.
   2) Second try: only then OCR reads the NEW image and submits the real value (never OCRs the pre-"1" image).
+  If the captcha still does not load after 3 tries in one session, 1.py restarts the browser, refills the form,
+  and retries (CAPTCHA_SESSION_REFRESH_ROUNDS, default 5). Env: CAPTCHA_SESSION_REFRESH_ROUNDS=1 to disable refresh.
   After second try, results wait up to 40s before NO_LOAD is decided.
   Index II: one document per click (popup → save → close).
   If NO_LOAD after that: repeat full form, first try = 1 again, second try = CapSolver API.
@@ -52,7 +54,9 @@ def main():
     )
     print(
         "[run_first_district_12th_tahsil] Captcha: (1) First try — enter 1, submit, WAIT until image changes. "
-        "(2) Second try — OCR/CapSolver on the NEW image only. NO_LOAD → CapSolver path; still NO_LOAD → next gut."
+        "(2) Second try — OCR/CapSolver on the NEW image only. "
+        "If captcha fails 3× in one session → browser refresh + form refill + retry (see CAPTCHA_SESSION_REFRESH_ROUNDS). "
+        "NO_LOAD → CapSolver path; still NO_LOAD → next gut."
     )
     rc = subprocess.run([sys.executable, one_py, year], env=env, cwd=script_dir)
     sys.exit(rc.returncode)

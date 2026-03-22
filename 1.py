@@ -1229,12 +1229,37 @@ def run_scraper_for_year(year, window_position):
             safe_print_func(f"[DUMMY CAPTCHA ERROR] {e}")
             return None, None
     
-    def solve_captcha_with_api_and_submit(driver, wait, safe_print_func, captcha_image_path, src_before_dummy_submit=None):
-        """Second try: after first try (dummy=1), wait until captcha image *changes*, then OCR and submit.
+    def refresh_session_and_replay_dummy_captcha(driver, wait, safe_print_func, meta, gut_no):
+        """Restart browser, reload site, refill form, dummy captcha — returns (driver, wait, src_before_dummy) or (..., None)."""
+        safe_print_func(
+            "[CAPTCHA] Refreshing session: restarting browser, reloading site, first try (1) again..."
+        )
+        try:
+            terminate_driver_safely(driver)
+        except Exception:
+            pass
+        driver, wait = safe_browser_restart()
+        if not safe_get_url(driver, WEBSITE_URL):
+            safe_print_func("[CAPTCHA] Session refresh: failed to load website")
+            return driver, wait, None
+        driver, wait = close_popup_and_click_rest(driver, wait)
+        Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(meta["year"])
+        select_dropdown_safe(driver, "ddlDistrict1", meta["d_val"])
+        wait_for_dropdown_population(driver, "ddltahsil")
+        select_dropdown_safe(driver, "ddltahsil", meta["t_val"])
+        wait_for_dropdown_population(driver, "ddlvillage")
+        select_dropdown_safe(driver, "ddlvillage", meta["v_val"])
+        if not enter_gut_number(driver, wait, gut_no):
+            safe_print_func("[CAPTCHA] Session refresh: failed to enter gut number")
+            return driver, wait, None
+        captcha_elem, src_before = submit_dummy_captcha(driver, wait, safe_print_func)
+        if captcha_elem is None:
+            safe_print_func("[CAPTCHA] Session refresh: dummy captcha failed")
+            return driver, wait, None
+        return driver, wait, src_before
 
-        src_before_dummy_submit: img src captured in submit_dummy_captcha *before* clicking Search with "1".
-        Retries: enter 1 again, wait for src change, then OCR again.
-        """
+    def _solve_captcha_ocr_single_session(driver, wait, safe_print_func, captcha_image_path, src_baseline=None):
+        """Up to 3 attempts to load/solve captcha with OCR in the current browser session."""
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1248,7 +1273,7 @@ def run_scraper_for_year(year, window_position):
                 old_captcha_src = None
                 baseline_src = None
                 if attempt == 1:
-                    baseline_src = src_before_dummy_submit
+                    baseline_src = src_baseline
                     if baseline_src is None:
                         try:
                             baseline_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src")
@@ -1426,12 +1451,44 @@ def run_scraper_for_year(year, window_position):
                 return False
         
         return False
-    
-    def solve_captcha_with_capsolver_and_submit(driver, wait, safe_print_func, captcha_image_path, src_before_dummy_submit=None):
-        """Second try (CapSolver): wait until captcha image changes after first try, then API + submit.
 
-        src_before_dummy_submit: img src from submit_dummy_captcha *before* clicking Search with "1".
+    def solve_captcha_with_api_and_submit(
+        driver,
+        wait,
+        safe_print_func,
+        captcha_image_path,
+        src_before_dummy_submit=None,
+        meta=None,
+        gut_no=None,
+    ):
+        """OCR captcha: up to 3 tries per session; if CAPTCHA_SESSION_REFRESH_ROUNDS>1, restart browser and retry.
+
+        Returns (success: bool, driver, wait). Caller must use returned driver/wait after refresh.
         """
+        max_outer = int(os.environ.get("CAPTCHA_SESSION_REFRESH_ROUNDS", "5"))
+
+        current_src = src_before_dummy_submit
+        for outer in range(1, max_outer + 1):
+            if outer > 1:
+                safe_print_func(
+                    f"[CAPTCHA] Session refresh round {outer}/{max_outer} "
+                    "(previous round: captcha did not load/solve after 3 tries)..."
+                )
+            if _solve_captcha_ocr_single_session(driver, wait, safe_print_func, captcha_image_path, current_src):
+                return True, driver, wait
+            if outer < max_outer and meta is not None and gut_no is not None:
+                driver, wait, new_src = refresh_session_and_replay_dummy_captcha(
+                    driver, wait, safe_print_func, meta, gut_no
+                )
+                if new_src is None:
+                    return False, driver, wait
+                current_src = new_src
+                continue
+            return False, driver, wait
+        return False, driver, wait
+    
+    def _solve_captcha_capsolver_single_session(driver, wait, safe_print_func, captcha_image_path, src_baseline=None):
+        """Up to 3 attempts to load/solve captcha with CapSolver in the current browser session."""
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1442,7 +1499,7 @@ def run_scraper_for_year(year, window_position):
                 old_captcha_src = None
                 baseline_src = None
                 if attempt == 1:
-                    baseline_src = src_before_dummy_submit
+                    baseline_src = src_baseline
                     if baseline_src is None:
                         try:
                             baseline_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src")
@@ -1617,6 +1674,43 @@ def run_scraper_for_year(year, window_position):
                 return False
 
         return False
+
+    def solve_captcha_with_capsolver_and_submit(
+        driver,
+        wait,
+        safe_print_func,
+        captcha_image_path,
+        src_before_dummy_submit=None,
+        meta=None,
+        gut_no=None,
+    ):
+        """CapSolver captcha: up to 3 tries per session; optional browser refresh between rounds.
+
+        Returns (success: bool, driver, wait).
+        """
+        max_outer = int(os.environ.get("CAPTCHA_SESSION_REFRESH_ROUNDS", "5"))
+
+        current_src = src_before_dummy_submit
+        for outer in range(1, max_outer + 1):
+            if outer > 1:
+                safe_print_func(
+                    f"[CAPTCHA API] Session refresh round {outer}/{max_outer} "
+                    "(previous round: captcha did not load/solve after 3 tries)..."
+                )
+            if _solve_captcha_capsolver_single_session(
+                driver, wait, safe_print_func, captcha_image_path, current_src
+            ):
+                return True, driver, wait
+            if outer < max_outer and meta is not None and gut_no is not None:
+                driver, wait, new_src = refresh_session_and_replay_dummy_captcha(
+                    driver, wait, safe_print_func, meta, gut_no
+                )
+                if new_src is None:
+                    return False, driver, wait
+                current_src = new_src
+                continue
+            return False, driver, wait
+        return False, driver, wait
     
     # Continue with the rest of the browser functions
     def get_dropdown_options_safe(driver, select_id, max_retries=10):
@@ -2180,8 +2274,14 @@ def run_scraper_for_year(year, window_position):
                 if captcha_elem is None:
                     raise RuntimeError("Failed to submit dummy captcha")
                 
-                captcha_success = solve_captcha_with_api_and_submit(
-                    driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                captcha_success, driver, wait = solve_captcha_with_api_and_submit(
+                    driver,
+                    wait,
+                    safe_print,
+                    CAPTCHA_IMAGE_PATH,
+                    src_before_dummy_submit=src_before_dummy,
+                    meta=meta,
+                    gut_no=meta["property_no"],
                 )
                 if not captcha_success:
                     raise RuntimeError(f"Failed to solve captcha for gut {meta['property_no']}")
@@ -2210,9 +2310,16 @@ def run_scraper_for_year(year, window_position):
                     captcha_elem, src_before_dummy = submit_dummy_captcha(driver, wait, safe_print)
                     if captcha_elem is None:
                         raise RuntimeError("Failed to submit dummy captcha before CapSolver")
-                    if not solve_captcha_with_capsolver_and_submit(
-                        driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
-                    ):
+                    ok_cs, driver, wait = solve_captcha_with_capsolver_and_submit(
+                        driver,
+                        wait,
+                        safe_print,
+                        CAPTCHA_IMAGE_PATH,
+                        src_before_dummy_submit=src_before_dummy,
+                        meta=meta,
+                        gut_no=meta["property_no"],
+                    )
+                    if not ok_cs:
                         raise RuntimeError(f"CapSolver captcha failed for gut {meta['property_no']}")
                     status = wait_for_results(driver)
                     norm_resume = (str(status) if status is not None else "").strip().upper().replace(" ", "_")
@@ -2684,8 +2791,14 @@ def run_scraper_for_year(year, window_position):
                     return 0
                 
                 # Now solve the actual captcha (wait for NEW image vs src_before_dummy, then OCR)
-                captcha_success = solve_captcha_with_api_and_submit(
-                    driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
+                captcha_success, driver, wait = solve_captcha_with_api_and_submit(
+                    driver,
+                    wait,
+                    safe_print,
+                    CAPTCHA_IMAGE_PATH,
+                    src_before_dummy_submit=src_before_dummy,
+                    meta=meta,
+                    gut_no=gut_no,
                 )
                 if not captcha_success:
                     safe_print(f"[GUT ERROR] Captcha failed for gut {gut_no}")
@@ -2737,9 +2850,16 @@ def run_scraper_for_year(year, window_position):
                         if attempt < MAX_SESSION_RETRY:
                             continue
                         return 0
-                    if not solve_captcha_with_capsolver_and_submit(
-                        driver, wait, safe_print, CAPTCHA_IMAGE_PATH, src_before_dummy_submit=src_before_dummy
-                    ):
+                    ok_cs, driver, wait = solve_captcha_with_capsolver_and_submit(
+                        driver,
+                        wait,
+                        safe_print,
+                        CAPTCHA_IMAGE_PATH,
+                        src_before_dummy_submit=src_before_dummy,
+                        meta=meta,
+                        gut_no=gut_no,
+                    )
+                    if not ok_cs:
                         safe_print(f"[GUT ERROR] CapSolver captcha failed for gut {gut_no}")
                         if attempt < MAX_SESSION_RETRY:
                             continue
