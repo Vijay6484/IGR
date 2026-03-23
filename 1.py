@@ -310,6 +310,271 @@ class GoogleDriveUploader:
                     uploaded += 1
         return uploaded
 
+
+class GlobalProgressSheet:
+    """
+    Global Google Sheet progress tracker:
+    - Spreadsheet in configured Drive root folder
+    - Tabs for years 2026..1985
+    - Columns: district, tahsil, village, 1..9
+    - Property cell colors: red (pending), yellow (ongoing), green (done)
+    """
+
+    def __init__(self, drive_uploader: GoogleDriveUploader, safe_print=None):
+        self.drive_uploader = drive_uploader
+        self.safe_print = safe_print or (lambda *a, **k: None)
+        self.enabled = bool(drive_uploader and drive_uploader.enabled)
+        self.title = os.environ.get("GDRIVE_PROGRESS_SHEET_TITLE", "IGR Global Progress").strip() or "IGR Global Progress"
+        self._sheet_service = None
+        self._drive_service = None
+        self._spreadsheet_id = None
+        self._sheet_id_by_title = {}
+        self._row_cache = {}  # year(str) -> { "d|t|v": row_index }
+
+    def _drive_kwargs(self):
+        return {"supportsAllDrives": True}
+
+    def _list_kwargs(self):
+        kw = {"supportsAllDrives": True, "includeItemsFromAllDrives": True}
+        if self.drive_uploader and self.drive_uploader.shared_drive_id:
+            kw.update({"corpora": "drive", "driveId": self.drive_uploader.shared_drive_id})
+        return kw
+
+    @staticmethod
+    def _escape_query(s: str) -> str:
+        return (s or "").replace("'", "\\'")
+
+    def _sheet_title(self, year) -> str:
+        return str(year)
+
+    def _years(self):
+        return [str(y) for y in range(2026, 1984, -1)]
+
+    def _status_color(self, status: str):
+        s = (status or "").strip().lower()
+        if s == "done":
+            return {"red": 0.72, "green": 0.90, "blue": 0.72}  # light green
+        if s == "ongoing":
+            return {"red": 0.98, "green": 0.93, "blue": 0.66}  # light yellow
+        return {"red": 0.96, "green": 0.76, "blue": 0.76}      # light red
+
+    def _get_drive_service(self):
+        if self._drive_service is not None:
+            return self._drive_service
+        self._drive_service = self.drive_uploader._build_service()
+        return self._drive_service
+
+    def _get_sheet_service(self):
+        if self._sheet_service is not None:
+            return self._sheet_service
+        from googleapiclient.discovery import build
+
+        drive_svc = self._get_drive_service()
+        creds = getattr(getattr(drive_svc, "_http", None), "credentials", None)
+        if creds is None:
+            raise RuntimeError("Could not obtain Google credentials for Sheets API")
+        self._sheet_service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        return self._sheet_service
+
+    def _parse_row_from_updated_range(self, updated_range: str) -> int:
+        # Example: "2025!A23:L23"
+        if "!" in updated_range:
+            part = updated_range.split("!", 1)[1]
+        else:
+            part = updated_range
+        start = part.split(":", 1)[0]
+        digits = "".join(ch for ch in start if ch.isdigit())
+        return int(digits) if digits else 2
+
+    def _ensure_spreadsheet(self):
+        if self._spreadsheet_id:
+            return self._spreadsheet_id
+        drive_svc = self._get_drive_service()
+        sheets_svc = self._get_sheet_service()
+        root_id = self.drive_uploader._ensure_root_folder()
+
+        q = (
+            "mimeType='application/vnd.google-apps.spreadsheet' and "
+            f"name='{self._escape_query(self.title)}' and "
+            f"'{root_id}' in parents and trashed=false"
+        )
+        resp = drive_svc.files().list(q=q, fields="files(id,name)", pageSize=10, **self._list_kwargs()).execute()
+        files = resp.get("files", [])
+        if files:
+            self._spreadsheet_id = files[0]["id"]
+            return self._spreadsheet_id
+
+        created = sheets_svc.spreadsheets().create(
+            body={"properties": {"title": self.title}},
+            fields="spreadsheetId",
+        ).execute()
+        self._spreadsheet_id = created["spreadsheetId"]
+
+        info = drive_svc.files().get(fileId=self._spreadsheet_id, fields="parents", **self._drive_kwargs()).execute()
+        parents = info.get("parents", [])
+        remove_parents = ",".join(parents) if parents else None
+        kwargs = {"fileId": self._spreadsheet_id, "addParents": root_id, **self._drive_kwargs()}
+        if remove_parents:
+            kwargs["removeParents"] = remove_parents
+        drive_svc.files().update(**kwargs).execute()
+        return self._spreadsheet_id
+
+    def _refresh_sheet_map(self):
+        sheets_svc = self._get_sheet_service()
+        sid = self._ensure_spreadsheet()
+        meta = sheets_svc.spreadsheets().get(spreadsheetId=sid).execute()
+        self._sheet_id_by_title = {}
+        for sh in meta.get("sheets", []):
+            props = sh.get("properties", {})
+            title = props.get("title")
+            sheet_id = props.get("sheetId")
+            if title is not None and sheet_id is not None:
+                self._sheet_id_by_title[str(title)] = int(sheet_id)
+
+    def _ensure_year_tabs_and_headers(self):
+        sheets_svc = self._get_sheet_service()
+        sid = self._ensure_spreadsheet()
+        if not self._sheet_id_by_title:
+            self._refresh_sheet_map()
+
+        requests_payload = []
+        for y in self._years():
+            if y not in self._sheet_id_by_title:
+                requests_payload.append({"addSheet": {"properties": {"title": y}}})
+        if requests_payload:
+            sheets_svc.spreadsheets().batchUpdate(
+                spreadsheetId=sid, body={"requests": requests_payload}
+            ).execute()
+            self._refresh_sheet_map()
+
+        header = [["district", "tahsil", "village", "1", "2", "3", "4", "5", "6", "7", "8", "9"]]
+        for y in self._years():
+            sheets_svc.spreadsheets().values().update(
+                spreadsheetId=sid,
+                range=f"'{y}'!A1:L1",
+                valueInputOption="RAW",
+                body={"values": header},
+            ).execute()
+
+    def ensure_ready(self):
+        if not self.enabled:
+            return False
+        try:
+            self._ensure_spreadsheet()
+            self._ensure_year_tabs_and_headers()
+            return True
+        except Exception as e:
+            self.safe_print(f"[GSHEET] Disabled (init failed): {e}")
+            self.enabled = False
+            return False
+
+    def _get_row_cache_for_year(self, year: str):
+        year = self._sheet_title(year)
+        if year in self._row_cache:
+            return self._row_cache[year]
+        sheets_svc = self._get_sheet_service()
+        sid = self._ensure_spreadsheet()
+        cache = {}
+        try:
+            resp = sheets_svc.spreadsheets().values().get(
+                spreadsheetId=sid,
+                range=f"'{year}'!A2:C",
+            ).execute()
+            values = resp.get("values", [])
+            for idx, row in enumerate(values, start=2):
+                if len(row) < 3:
+                    continue
+                key = f"{str(row[0]).strip()}|{str(row[1]).strip()}|{str(row[2]).strip()}"
+                cache[key] = idx
+        except Exception:
+            cache = {}
+        self._row_cache[year] = cache
+        return cache
+
+    def _set_property_cells_color(self, year: str, row_idx: int, start_prop: int, end_prop: int, status: str):
+        if start_prop > end_prop:
+            return
+        sheet_id = self._sheet_id_by_title.get(self._sheet_title(year))
+        if sheet_id is None:
+            self._refresh_sheet_map()
+            sheet_id = self._sheet_id_by_title.get(self._sheet_title(year))
+        if sheet_id is None:
+            return
+        sheets_svc = self._get_sheet_service()
+        sid = self._ensure_spreadsheet()
+        start_col = 2 + int(start_prop)  # A=0,B=1,C=2,D=3 ; prop1 -> col 3
+        end_col = 2 + int(end_prop) + 1
+        req = {
+            "repeatCell": {
+                "range": {
+                    "sheetId": int(sheet_id),
+                    "startRowIndex": int(row_idx) - 1,
+                    "endRowIndex": int(row_idx),
+                    "startColumnIndex": int(start_col),
+                    "endColumnIndex": int(end_col),
+                },
+                "cell": {"userEnteredFormat": {"backgroundColor": self._status_color(status)}},
+                "fields": "userEnteredFormat.backgroundColor",
+            }
+        }
+        sheets_svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [req]}).execute()
+
+    def ensure_village_row(self, year, district_idx: int, tahsil_idx: int, village_idx: int, completed_upto: int = 0):
+        if not self.enabled:
+            return
+        try:
+            year_title = self._sheet_title(year)
+            sid = self._ensure_spreadsheet()
+            row_cache = self._get_row_cache_for_year(year_title)
+            key = f"{district_idx}|{tahsil_idx}|{village_idx}"
+            row_idx = row_cache.get(key)
+
+            sheets_svc = self._get_sheet_service()
+            if row_idx is None:
+                row_values = [[int(district_idx), int(tahsil_idx), int(village_idx), 1, 2, 3, 4, 5, 6, 7, 8, 9]]
+                resp = sheets_svc.spreadsheets().values().append(
+                    spreadsheetId=sid,
+                    range=f"'{year_title}'!A2:L2",
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body={"values": row_values},
+                ).execute()
+                updated_range = resp.get("updates", {}).get("updatedRange", "")
+                row_idx = self._parse_row_from_updated_range(updated_range)
+                row_cache[key] = row_idx
+                self._set_property_cells_color(year_title, row_idx, 1, 9, "not_done")
+
+            completed = int(completed_upto or 0)
+            if completed > 0:
+                self._set_property_cells_color(year_title, row_idx, 1, min(9, completed), "done")
+            if completed < 9:
+                self._set_property_cells_color(year_title, row_idx, max(1, completed + 1), 9, "not_done")
+        except Exception as e:
+            self.safe_print(f"[GSHEET] ensure_village_row failed ({year}/{district_idx}/{tahsil_idx}/{village_idx}): {e}")
+
+    def set_property_status(self, year, district_idx: int, tahsil_idx: int, village_idx: int, property_no: int, status: str):
+        if not self.enabled:
+            return
+        p = int(property_no)
+        if p < 1 or p > 9:
+            return
+        try:
+            year_title = self._sheet_title(year)
+            row_cache = self._get_row_cache_for_year(year_title)
+            key = f"{district_idx}|{tahsil_idx}|{village_idx}"
+            row_idx = row_cache.get(key)
+            if row_idx is None:
+                self.ensure_village_row(year_title, district_idx, tahsil_idx, village_idx, completed_upto=0)
+                row_cache = self._get_row_cache_for_year(year_title)
+                row_idx = row_cache.get(key)
+                if row_idx is None:
+                    return
+            self._set_property_cells_color(year_title, row_idx, p, p, status)
+        except Exception as e:
+            self.safe_print(
+                f"[GSHEET] set_property_status failed ({year}/{district_idx}/{tahsil_idx}/{village_idx}/p{property_no}): {e}"
+            )
+
 # Global constants
 BUTTON_CLICK_TIMEOUT = 60
 POPUP_TIMEOUT = 60
@@ -685,6 +950,19 @@ def run_scraper_for_year(year, window_position):
         except Exception as e:
             safe_print(f"[GDRIVE] Storage init failed: {e}")
             drive_storage = None
+
+    # Optional: global Google Sheets progress tracker
+    progress_sheet = None
+    if drive_uploader and os.environ.get("GDRIVE_PROGRESS_SHEET_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            progress_sheet = GlobalProgressSheet(drive_uploader=drive_uploader, safe_print=safe_print)
+            if progress_sheet.ensure_ready():
+                safe_print("[GSHEET] Global progress sheet enabled")
+            else:
+                progress_sheet = None
+        except Exception as e:
+            safe_print(f"[GSHEET] Disabled (init exception): {e}")
+            progress_sheet = None
     
     # Initialize variables
     global_counter = {"total_records": 0, "total_pages": 0}
@@ -3223,6 +3501,8 @@ def run_scraper_for_year(year, window_position):
                         v_state = drive_storage.read_json(v_path, "village.json") or {}
                         if isinstance(v_state, dict):
                             if str(v_state.get("status", "")).strip().lower() == "completed":
+                                if progress_sheet:
+                                    progress_sheet.ensure_village_row(year, d_idx, t_idx, v_idx, completed_upto=9)
                                 safe_print(f"[VILLAGE {v_name}] Already complete (village.json status=completed), skipping")
                                 continue
                             try:
@@ -3240,8 +3520,13 @@ def run_scraper_for_year(year, window_position):
                             last_gut = max(int(last_gut), resume_from.get("property_no", 1) - 1)
                             safe_print(f"[RESUME] Starting from property {last_gut + 1} (checkpoint was property {resume_from.get('property_no')} page {resume_from.get('page')})")
                         if last_gut >= 9:
+                            if progress_sheet:
+                                progress_sheet.ensure_village_row(year, d_idx, t_idx, v_idx, completed_upto=9)
                             safe_print(f"[VILLAGE {v_name}] Already complete (last_gut={last_gut}), skipping")
                             continue
+
+                    if progress_sheet:
+                        progress_sheet.ensure_village_row(year, d_idx, t_idx, v_idx, completed_upto=max(0, int(last_gut)))
                         
                     if not (DRIVE_ONLY and drive_storage):
                         save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, 1, 1)
@@ -3254,6 +3539,8 @@ def run_scraper_for_year(year, window_position):
                     for gut_no in range(max(1, int(last_gut) + 1), 10):
                         if os.path.exists(STOP_FILE):
                             break
+                        if progress_sheet:
+                            progress_sheet.set_property_status(year, d_idx, t_idx, v_idx, gut_no, "ongoing")
                         if not (DRIVE_ONLY and drive_storage):
                             save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, gut_no, 1)
                         resume_from_page = 1
@@ -3280,6 +3567,8 @@ def run_scraper_for_year(year, window_position):
                             progress[key][v_name] = gut_no
                             save_progress(progress)
                         mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=gut_no, lastPage=resume_from_page, htmlSavedCount=html_count)
+                        if progress_sheet:
+                            progress_sheet.set_property_status(year, d_idx, t_idx, v_idx, gut_no, "done")
                         
                         # Refresh website and re-enter details for next property (retry with new instance on session death)
                         if gut_no < 9:
