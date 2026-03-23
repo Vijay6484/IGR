@@ -491,6 +491,11 @@ def setup_logger(log_file, year):
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
+    # Ensure log directory exists before creating file handler.
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
     # Create file handler
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
@@ -515,6 +520,10 @@ def log_to_json(log_file, level, category, message, details=None):
     }
     
     try:
+        log_dir = os.path.dirname(log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+
         # Read existing logs if file exists
         logs = []
         if os.path.exists(log_file):
@@ -552,6 +561,10 @@ def log_to_compressed_json(log_file, level, category, message, details=None):
             return super().default(obj)
             
     try:
+        log_dir = os.path.dirname(log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+
         # Read existing logs if file exists
         logs = []
         if os.path.exists(log_file):
@@ -3025,7 +3038,19 @@ def run_scraper_for_year(year, window_position):
         # Initialize year.json in Drive-only mode
         mark_year_state("ongoing", current=None, districts={})
 
-        if not safe_get_url(driver, WEBSITE_URL):
+        initial_load_ok = False
+        initial_load_attempts = max(1, MAX_SESSION_RETRY)
+        for init_attempt in range(1, initial_load_attempts + 1):
+            if safe_get_url(driver, WEBSITE_URL):
+                initial_load_ok = True
+                break
+            safe_print(
+                f"[MAIN WARN] Initial website load failed ({init_attempt}/{initial_load_attempts}); "
+                "restarting browser session"
+            )
+            terminate_driver_safely(driver)
+            driver, wait = safe_browser_restart()
+        if not initial_load_ok:
             raise RuntimeError("Failed to load website on initial attempt")
             
         driver, wait = close_popup_and_click_rest(driver, wait)
