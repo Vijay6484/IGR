@@ -3084,6 +3084,13 @@ def run_scraper_for_year(year, window_position):
                     safe_print(f"[ERROR] No villages found for tahsil {t_name}")
                     continue
                 safe_print(f"[INFO] Found {len(village_options)} villages in tahsil {t_name}")
+                if ONLY_VILLAGE_INDEX and ONLY_VILLAGE_INDEX > len(village_options):
+                    safe_print(
+                        f"[VILLAGE FILTER] ONLY_VILLAGE_INDEX={ONLY_VILLAGE_INDEX} is out of range "
+                        f"(available villages: 1..{len(village_options)}) for district #{d_idx} / tahsil #{t_idx}. "
+                        "Exiting this scraper instance."
+                    )
+                    return
                 
                 villages_state = {}
                 for v_idx, (v_name, v_val) in enumerate(village_options, start=1):
@@ -3211,6 +3218,13 @@ def run_scraper_for_year(year, window_position):
                     mark_taluka_state(d_idx, t_idx, "ongoing", current=None, villages=villages_state)
                     # Play village completion sound
                     play_village_complete_sound()
+
+                    # If running a specific village index, stop village iteration here.
+                    # This avoids moving to next village when parallel tmux sessions are
+                    # each handling their own village index.
+                    if ONLY_VILLAGE_INDEX and v_idx == ONLY_VILLAGE_INDEX:
+                        safe_print(f"[VILLAGE FILTER] Target village #{ONLY_VILLAGE_INDEX} completed, stopping village loop.")
+                        break
                     
                     # Completely restart browser session after each village
                     terminate_driver_safely(driver)
@@ -3352,13 +3366,18 @@ def main(argv=None):
     Main entry point - scrape a single year.
     
     Usage:
-        python 1.py 2026
+        python3 1.py <year> [district_index] [tehsil_index] [village_index]
+        python3 1.py 2026 1 12 7
     """
     if argv is None:
         argv = sys.argv[1:]
 
     if not argv:
-        print("Usage: python 1.py <year>")
+        print("Usage: python3 1.py <year> [district_index] [tehsil_index] [village_index]")
+        sys.exit(1)
+    if len(argv) > 4:
+        print("Too many arguments.")
+        print("Usage: python3 1.py <year> [district_index] [tehsil_index] [village_index]")
         sys.exit(1)
 
     year = str(argv[0]).strip()
@@ -3366,8 +3385,41 @@ def main(argv=None):
         print(f"Invalid year '{year}'. Please provide a 4-digit year, e.g. 2026.")
         sys.exit(1)
 
+    district_idx = 0
+    tehsil_idx = 0
+    village_idx = 0
+
+    if len(argv) >= 2:
+        district_str = str(argv[1]).strip()
+        if not district_str.isdigit() or int(district_str) <= 0:
+            print(f"Invalid district index '{district_str}'. Please provide a positive integer.")
+            sys.exit(1)
+        district_idx = int(district_str)
+
+    if len(argv) >= 3:
+        tehsil_str = str(argv[2]).strip()
+        if not tehsil_str.isdigit() or int(tehsil_str) <= 0:
+            print(f"Invalid tehsil index '{tehsil_str}'. Please provide a positive integer.")
+            sys.exit(1)
+        tehsil_idx = int(tehsil_str)
+
+    if len(argv) >= 4:
+        village_str = str(argv[3]).strip()
+        if not village_str.isdigit() or int(village_str) <= 0:
+            print(f"Invalid village index '{village_str}'. Please provide a positive integer.")
+            sys.exit(1)
+        village_idx = int(village_str)
+
+    # Reuse existing env-based filtering logic inside run_scraper_for_year.
+    os.environ["ONLY_DISTRICT_INDEX"] = str(district_idx)
+    os.environ["ONLY_TAHSIL_INDEX"] = str(tehsil_idx)
+    os.environ["ONLY_VILLAGE_INDEX"] = str(village_idx)
+
     years_to_scrape = [year]
-    print(f"[1.py] Scraping year: {year}")
+    print(
+        f"[1.py] Scraping year={year}, district_index={district_idx or 'ALL'}, "
+        f"tehsil_index={tehsil_idx or 'ALL'}, village_index={village_idx or 'ALL'}"
+    )
 
     # For a single year, there is no benefit in running multiple concurrent processes
     run_years_in_batches(years_to_scrape, 1)
