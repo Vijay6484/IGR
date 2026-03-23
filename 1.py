@@ -1751,6 +1751,9 @@ def run_scraper_for_year(year, window_position):
                     continue
             except Exception as e:
                 safe_print(f"[DROPDOWN ERROR] Failed to get options for {select_id}: {e}")
+                if is_session_dead_error(e) or not is_browser_alive(driver):
+                    safe_print(f"[DROPDOWN] Browser session appears dead while reading {select_id}")
+                    return []
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
@@ -1854,6 +1857,34 @@ def run_scraper_for_year(year, window_position):
         except Exception as e:
             safe_print(f"[VILLAGE REFRESH ERROR] Failed to get fresh village options: {e}")
             return []
+
+    def restore_to_tahsil_context(driver, wait, year_value, district_value, tahsil_value):
+        """Restart browser and restore form selections through tahsil level."""
+        for attempt in range(1, MAX_SESSION_RETRY + 1):
+            try:
+                safe_print(
+                    f"[RECOVERY] Restoring browser context to tahsil "
+                    f"(attempt {attempt}/{MAX_SESSION_RETRY})"
+                )
+                terminate_driver_safely(driver)
+                driver, wait = safe_browser_restart()
+                if not safe_get_url(driver, WEBSITE_URL):
+                    raise RuntimeError("Failed to load website during context restore")
+                driver, wait = close_popup_and_click_rest(driver, wait)
+                Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(year_value)
+                if not select_dropdown_safe(driver, "ddlDistrict1", district_value):
+                    raise RuntimeError("Failed to select district during context restore")
+                if not wait_for_dropdown_population(driver, "ddltahsil"):
+                    raise RuntimeError("Tahsil dropdown not populated during context restore")
+                if not select_dropdown_safe(driver, "ddltahsil", tahsil_value):
+                    raise RuntimeError("Failed to select tahsil during context restore")
+                return driver, wait, True
+            except Exception as e:
+                safe_print(f"[RECOVERY] Context restore failed: {e}")
+                if attempt >= MAX_SESSION_RETRY:
+                    break
+                time.sleep(2)
+        return driver, wait, False
     
     def enter_gut_number(driver, wait, gut_no):
         max_attempts = 3
@@ -3104,7 +3135,25 @@ def run_scraper_for_year(year, window_position):
                     safe_print(f"[ERROR] Failed to select tahsil {t_name}, skipping")
                     continue
                     
-                village_options = get_fresh_village_options(driver, wait)
+                village_options = []
+                for village_attempt in range(1, MAX_SESSION_RETRY + 1):
+                    village_options = get_fresh_village_options(driver, wait)
+                    if village_options:
+                        break
+                    if not is_browser_alive(driver):
+                        safe_print(
+                            f"[VILLAGE RECOVERY] Browser/session lost while loading village dropdown "
+                            f"for tahsil {t_name}; restarting and retrying ({village_attempt}/{MAX_SESSION_RETRY})"
+                        )
+                        driver, wait, restored = restore_to_tahsil_context(driver, wait, year, d_val, t_val)
+                        if not restored:
+                            break
+                        continue
+                    safe_print(
+                        f"[VILLAGE RETRY] Empty village dropdown for tahsil {t_name} "
+                        f"({village_attempt}/{MAX_SESSION_RETRY}), retrying..."
+                    )
+                    time.sleep(2)
                 if not village_options:
                     safe_print(f"[ERROR] No villages found for tahsil {t_name}")
                     continue
@@ -3266,7 +3315,21 @@ def run_scraper_for_year(year, window_position):
                     if not wait_for_dropdown_population(driver, "ddlvillage"):
                         safe_print(f"[ERROR] Village dropdown not populated after selecting tahsil {t_name}")
                         break
-                    village_options = get_fresh_village_options(driver, wait)
+                    village_options = []
+                    for village_attempt in range(1, MAX_SESSION_RETRY + 1):
+                        village_options = get_fresh_village_options(driver, wait)
+                        if village_options:
+                            break
+                        if not is_browser_alive(driver):
+                            safe_print(
+                                f"[VILLAGE RECOVERY] Browser/session lost after village refresh for tahsil {t_name}; "
+                                f"restarting and retrying ({village_attempt}/{MAX_SESSION_RETRY})"
+                            )
+                            driver, wait, restored = restore_to_tahsil_context(driver, wait, year, d_val, t_val)
+                            if not restored:
+                                break
+                            continue
+                        time.sleep(2)
                     if not village_options:
                         safe_print(f"[ERROR] No villages found for tahsil {t_name} after refresh")
                         break
