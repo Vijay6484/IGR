@@ -3,6 +3,8 @@ import json
 import mimetypes
 import os
 import tempfile
+import time
+import random
 from typing import Any, Iterable, Optional
 
 
@@ -71,6 +73,43 @@ class DriveStorage:
         files = resp.get("files", [])
         return files[0]["id"] if files else None
 
+    def _is_retryable_drive_error(self, e: Exception) -> bool:
+        """
+        Return True if the error looks transient and worth retrying.
+
+        This is common with Drive resumable uploads (e.g. 503 transientError).
+        """
+        msg = str(e).lower()
+        # Fast-path for common transient signals.
+        if "transient" in msg or "rateLimit" in msg or "resumable" in msg:
+            return True
+
+        try:
+            from googleapiclient.errors import HttpError
+
+            if isinstance(e, HttpError):
+                status = getattr(e.resp, "status", None)
+                return status in (429, 500, 502, 503, 504)
+        except Exception:
+            pass
+
+        return False
+
+    def _drive_retry_sleep(self, attempt: int, max_retries: int) -> None:
+        """
+        Exponential backoff with jitter.
+        attempt is 1-based.
+        """
+        # Keep delays reasonable; state writes are frequent.
+        base = float(os.environ.get("GDRIVE_RETRY_BASE_SECONDS", "0.8"))
+        max_sleep = float(os.environ.get("GDRIVE_RETRY_MAX_SLEEP_SECONDS", "8"))
+        sleep_s = min(max_sleep, base * (2 ** (attempt - 1)))
+        sleep_s += random.uniform(0, 0.35)
+        # Small cap to avoid extremely long sleeps even if env overrides are high.
+        if attempt >= max_retries:
+            sleep_s = min(sleep_s, 1.0)
+        time.sleep(sleep_s)
+
     def upsert_bytes(self, path_parts: Iterable[str], filename: str, content: bytes, mime: Optional[str] = None) -> str:
         """
         Create or overwrite a file at Drive path (folder path_parts + filename).
@@ -81,6 +120,10 @@ class DriveStorage:
         folder_id = self.ensure_path(path_parts)
         mime = mime or (mimetypes.guess_type(filename)[0] if filename else None) or "application/octet-stream"
 
+        max_retries = int(os.environ.get("GDRIVE_UPLOAD_MAX_RETRIES", "5"))
+        if max_retries < 1:
+            max_retries = 1
+
         # Use a temp file for upload (acceptable per requirements)
         tmp_path = None
         try:
@@ -88,18 +131,32 @@ class DriveStorage:
                 tmp_path = tmp.name
                 tmp.write(content)
 
-            existing_id = self._find_file_id(folder_id, filename)
-            media = MediaFileUpload(tmp_path, mimetype=mime, resumable=True)
-            if existing_id:
-                updated = self.service.files().update(fileId=existing_id, media_body=media, fields="id", **self._drive_kwargs()).execute()
-                return updated["id"]
-            created = self.service.files().create(
-                body={"name": filename, "parents": [folder_id]},
-                media_body=media,
-                fields="id",
-                **self._drive_kwargs(),
-            ).execute()
-            return created["id"]
+            for attempt in range(1, max_retries + 1):
+                try:
+                    existing_id = self._find_file_id(folder_id, filename)
+                    media = MediaFileUpload(tmp_path, mimetype=mime, resumable=True)
+                    if existing_id:
+                        updated = self.service.files().update(
+                            fileId=existing_id,
+                            media_body=media,
+                            fields="id",
+                            **self._drive_kwargs(),
+                        ).execute()
+                        return updated["id"]
+                    created = self.service.files().create(
+                        body={"name": filename, "parents": [folder_id]},
+                        media_body=media,
+                        fields="id",
+                        **self._drive_kwargs(),
+                    ).execute()
+                    return created["id"]
+                except Exception as e:
+                    if attempt >= max_retries or not self._is_retryable_drive_error(e):
+                        raise
+                    time_last = min(attempt, max_retries)
+                    # Best-effort retry for transient Drive/API issues.
+                    self.safe_print(f"[GDRIVE] Retry {time_last}/{max_retries} for upsert {filename} due to: {e}")
+                    self._drive_retry_sleep(attempt, max_retries)
         finally:
             if tmp_path:
                 try:
@@ -116,19 +173,31 @@ class DriveStorage:
         folder_id = self.ensure_path(path_parts)
         mime = mime or (mimetypes.guess_type(filename)[0] if filename else None) or "application/octet-stream"
 
+        max_retries = int(os.environ.get("GDRIVE_UPLOAD_MAX_RETRIES", "5"))
+        if max_retries < 1:
+            max_retries = 1
+
         tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp_path = tmp.name
                 tmp.write(content)
-            media = MediaFileUpload(tmp_path, mimetype=mime, resumable=True)
-            created = self.service.files().create(
-                body={"name": filename, "parents": [folder_id]},
-                media_body=media,
-                fields="id",
-                **self._drive_kwargs(),
-            ).execute()
-            return created["id"]
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    media = MediaFileUpload(tmp_path, mimetype=mime, resumable=True)
+                    created = self.service.files().create(
+                        body={"name": filename, "parents": [folder_id]},
+                        media_body=media,
+                        fields="id",
+                        **self._drive_kwargs(),
+                    ).execute()
+                    return created["id"]
+                except Exception as e:
+                    if attempt >= max_retries or not self._is_retryable_drive_error(e):
+                        raise
+                    self.safe_print(f"[GDRIVE] Retry {attempt}/{max_retries} for create {filename} due to: {e}")
+                    self._drive_retry_sleep(attempt, max_retries)
         finally:
             if tmp_path:
                 try:

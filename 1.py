@@ -1112,34 +1112,64 @@ def run_scraper_for_year(year, window_position):
     
     def close_popup_and_click_rest(driver, wait):
         max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                # Close popup if exists
+        cooldown_seconds = int(os.environ.get("FORM_LOAD_RETRY_WAIT_SECONDS", "120"))
+        infinite_retry = os.environ.get("FORM_LOAD_INFINITE_RETRY", "1").strip().lower() in ("1", "true", "yes", "on")
+        cooldown_cycles = int(os.environ.get("FORM_LOAD_RETRY_CYCLES", "2"))
+        if cooldown_cycles < 1:
+            cooldown_cycles = 1
+
+        cycle = 0
+        while True:
+            cycle += 1
+            if os.path.exists(STOP_FILE):
+                raise RuntimeError("Form load retries stopped by stop file")
+            for attempt in range(1, max_attempts + 1):
                 try:
-                    popup_btn = WebDriverWait(driver, 2).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose.btn.btn-danger"))
+                    # Close popup if exists
+                    try:
+                        popup_btn = WebDriverWait(driver, 2).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose.btn.btn-danger"))
+                        )
+                        popup_btn.click()
+                        time.sleep(2)
+                        safe_print("[INFO] Closed popup")
+                    except TimeoutException:
+                        pass
+
+                    # Click other district search
+                    wait.until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch"))).click()
+                    wait.until(EC.visibility_of_element_located((By.ID, "ddlFromYear1")))
+                    return driver, wait
+
+                except (TimeoutException, NoSuchWindowException, StaleElementReferenceException, WebDriverException) as e:
+                    safe_print(
+                        f"[WARN] Form not loaded, restarting browser "
+                        f"(cycle {cycle}/{cooldown_cycles}, attempt {attempt}/{max_attempts}): {e}"
                     )
-                    popup_btn.click()
-                    time.sleep(2)
-                    safe_print("[INFO] Closed popup")
-                except TimeoutException:
-                    pass
-                
-                # Click other district search
-                wait.until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch"))).click()
-                wait.until(EC.visibility_of_element_located((By.ID, "ddlFromYear1")))
-                return driver, wait
-                
-            except (TimeoutException, NoSuchWindowException, StaleElementReferenceException, WebDriverException) as e:
-                safe_print(f"[WARN] Form not loaded, restarting browser ({attempt}/{max_attempts}): {e}")
-                terminate_driver_safely(driver)
-                driver, wait = safe_browser_restart()
-                if not safe_get_url(driver, WEBSITE_URL):
-                    if attempt < max_attempts:
-                        continue
-                    raise RuntimeError("Failed to load website after multiple attempts")
-        
-        raise RuntimeError("Form not loaded after retries")
+                    terminate_driver_safely(driver)
+                    driver, wait = safe_browser_restart()
+                    if not safe_get_url(driver, WEBSITE_URL):
+                        if attempt < max_attempts:
+                            continue
+                        break
+
+            if not infinite_retry and cycle >= cooldown_cycles:
+                break
+
+            safe_print(
+                f"[WARN] Form still not loaded after {max_attempts} attempts in cycle {cycle}. "
+                f"Waiting {cooldown_seconds}s before retrying website load."
+            )
+            time.sleep(cooldown_seconds)
+            terminate_driver_safely(driver)
+            driver, wait = safe_browser_restart()
+            if not safe_get_url(driver, WEBSITE_URL):
+                safe_print("[WARN] Website load failed after cooldown restart; moving to next cycle.")
+                continue
+
+        if infinite_retry:
+            raise RuntimeError("Form not loaded after infinite retry loop ended unexpectedly")
+        raise RuntimeError("Form not loaded after retries (including cooldown cycles)")
     
     # CAPTCHA functions - keeping these unchanged as they're working correctly
     def solve_captcha_with_api(image_path, api_key, timeout=180):
