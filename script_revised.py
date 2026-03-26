@@ -245,8 +245,13 @@ def _field(driver, element_id):
 
 def _build_driver():
     options = webdriver.ChromeOptions()
+    # Common stability options for both headed/headless runs.
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080")
     if HEADLESS == 1:
         options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
     else:
         options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
     return webdriver.Chrome(options=options)
