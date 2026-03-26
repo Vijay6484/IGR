@@ -36,6 +36,7 @@ VILLAGE_INDEX = int(sys.argv[5]) if len(sys.argv) > 5 else 1
 PROPERTY_START = 0
 PROPERTY_END = 9
 PROPERTY_RETRY_MAX = 3
+SELENIUM_BATCH_MAX = 4
 HTTP_RETRY_MAX = 4
 HTTP_RETRY_SLEEP_SEC = 2.0
 
@@ -250,8 +251,30 @@ def _build_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1920,1080")
     if HEADLESS == 1:
+        # VPS/headless-safe defaults
         options.add_argument("--headless=new")
         options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-software-rasterizer")
+
+        # Optional explicit binary override for VPS
+        env_bin = os.environ.get("CHROME_BINARY", "").strip()
+        if env_bin and os.path.exists(env_bin):
+            options.binary_location = env_bin
+        else:
+            # Common Linux VPS paths
+            linux_candidates = (
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+            )
+            for p in linux_candidates:
+                if os.path.exists(p):
+                    options.binary_location = p
+                    break
     else:
         options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
     return webdriver.Chrome(options=options)
@@ -462,6 +485,39 @@ def _session_from_cookies(cookies):
     return session
 
 
+def _get_selenium_state_with_retries(property_no: int, context: str):
+    """
+    Retry Selenium multiple times; if a retry batch fails, start fresh browser
+    sessions again while keeping caller state (property/page context).
+    """
+    last_exc = None
+    for batch in range(1, SELENIUM_BATCH_MAX + 1):
+        if batch > 1:
+            print(f"[SELENIUM NEW SESSION BATCH] property={property_no}, context={context}, batch={batch}/{SELENIUM_BATCH_MAX}")
+        for attempt in range(1, PROPERTY_RETRY_MAX + 1):
+            try:
+                print(
+                    f"[SELENIUM START] property={property_no}, context={context}, "
+                    f"attempt={attempt}/{PROPERTY_RETRY_MAX}, batch={batch}/{SELENIUM_BATCH_MAX}"
+                )
+                return run_selenium_for_property(property_no)
+            except Exception as e:
+                last_exc = e
+                print(
+                    f"[SELENIUM ERROR] property={property_no}, context={context}, "
+                    f"attempt={attempt}/{PROPERTY_RETRY_MAX}, batch={batch}/{SELENIUM_BATCH_MAX}: {e}"
+                )
+                if attempt < PROPERTY_RETRY_MAX:
+                    time.sleep(1.5)
+                    print(f"[SELENIUM RETRY] property={property_no}, context={context}")
+        # batch failed; move to fresh batch
+        if batch < SELENIUM_BATCH_MAX:
+            time.sleep(2.0)
+    if last_exc:
+        raise last_exc
+    raise Exception(f"Selenium failed for property={property_no}, context={context}")
+
+
 def _request_with_retry(send_fn, label: str, max_retries: int = HTTP_RETRY_MAX):
     """
     Retry network/server errors (e.g. 504) for the exact same request.
@@ -491,7 +547,7 @@ def _request_with_retry(send_fn, label: str, max_retries: int = HTTP_RETRY_MAX):
 
 def process_property(property_no: int):
     print(f"\n=== PROPERTY {property_no} ===")
-    state = run_selenium_for_property(property_no)
+    state = _get_selenium_state_with_retries(property_no, context="initial")
     session = _session_from_cookies(state["cookies"])
 
     hidden_state = {
@@ -542,7 +598,9 @@ def process_property(property_no: int):
         # At 11, 21, 31... refresh browser/session to avoid session drops.
         if next_page > 1 and (next_page % 10 == 1):
             print(f"[SESSION REFRESH] property={property_no}, target_page={next_page}")
-            refresh_state = run_selenium_for_property(property_no)
+            refresh_state = _get_selenium_state_with_retries(
+                property_no, context=f"refresh_to_page_{next_page}"
+            )
             session = _session_from_cookies(refresh_state["cookies"])
             state = refresh_state
             hidden_state = {
@@ -583,21 +641,11 @@ def process_property(property_no: int):
 
 def main():
     for property_no in range(PROPERTY_START, PROPERTY_END + 1):
-        success = False
-        for attempt in range(1, PROPERTY_RETRY_MAX + 1):
-            try:
-                print(f"[PROPERTY START] property={property_no}, attempt={attempt}/{PROPERTY_RETRY_MAX}")
-                process_property(property_no)
-                success = True
-                break
-            except Exception as e:
-                print(f"[PROPERTY ERROR] property={property_no}, attempt={attempt}: {e}")
-                if attempt < PROPERTY_RETRY_MAX:
-                    time.sleep(1.5)
-                    print(f"[PROPERTY RETRY] property={property_no} retrying...")
-                else:
-                    print(f"[PROPERTY SKIP] property={property_no} failed after {PROPERTY_RETRY_MAX} attempts")
-        if not success:
+        try:
+            print(f"[PROPERTY START] property={property_no}")
+            process_property(property_no)
+        except Exception as e:
+            print(f"[PROPERTY SKIP] property={property_no} failed: {e}")
             continue
 
 
