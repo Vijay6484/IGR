@@ -39,6 +39,7 @@ PROPERTY_RETRY_MAX = 3
 SELENIUM_BATCH_MAX = 4
 HTTP_RETRY_MAX = 4
 HTTP_RETRY_SLEEP_SEC = 2.0
+PAGE_RECOVERY_MAX = 3
 
 print(
     f"HEADLESS={HEADLESS}, YEAR={YEAR}, D={DISTRICT_INDEX}, "
@@ -556,7 +557,31 @@ def process_property(property_no: int):
         "__EVENTVALIDATION": state["eventvalidation"],
     }
 
-    def _post_page_and_update_hidden(target_page: int) -> bool:
+    def _build_page_milestones(target_page: int):
+        """
+        Replay checkpoints in this order:
+        21 -> 11,20,21
+        41 -> 11,20,21,30,31,40,41
+        """
+        if target_page <= 1:
+            return [target_page]
+
+        milestones = []
+        if target_page >= 11:
+            milestones.append(11)
+
+        n = 20
+        while n <= target_page:
+            milestones.append(n)
+            if n + 1 <= target_page:
+                milestones.append(n + 1)
+            n += 10
+
+        if not milestones or milestones[-1] != target_page:
+            milestones.append(target_page)
+        return milestones
+
+    def _post_page_and_update_hidden(target_page: int):
         payload_page_local = _build_common_payload(state, property_no, hidden_state)
         payload_page_local["__EVENTTARGET"] = "RegistrationGrid"
         payload_page_local["__EVENTARGUMENT"] = f"Page${target_page}"
@@ -569,18 +594,53 @@ def process_property(property_no: int):
         print((response_page_local.text or "")[:500])
 
         if _is_terminal_page_response(response_page_local.text):
-            print(f"[PAGE END] property={property_no}, page={target_page} terminal response")
-            return False
+            print(f"[PAGE WARN] property={property_no}, page={target_page} terminal-like response")
+            return False, "terminal"
 
         page_updates_local = _extract_hidden_fields_from_msajax_delta(response_page_local.text)
         if not page_updates_local:
-            print(f"[PAGE END] property={property_no}, page={target_page} no hidden updates")
-            return False
+            print(f"[PAGE WARN] property={property_no}, page={target_page} no hidden updates")
+            return False, "no_updates"
 
         hidden_state["__VIEWSTATE"] = page_updates_local.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
         hidden_state["__VIEWSTATEGENERATOR"] = page_updates_local.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
         hidden_state["__EVENTVALIDATION"] = page_updates_local.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
-        return True
+        return True, "ok"
+
+    def _recover_and_load_page(target_page: int):
+        """
+        When page post returns terminal-like response unexpectedly, refresh Selenium
+        and rebuild milestones (11,21,31,...) to the same target page.
+        """
+        nonlocal state, session, hidden_state
+        for rec_try in range(1, PAGE_RECOVERY_MAX + 1):
+            print(
+                f"[PAGE RECOVERY] property={property_no}, page={target_page}, "
+                f"attempt={rec_try}/{PAGE_RECOVERY_MAX}"
+            )
+            refresh_state = _get_selenium_state_with_retries(
+                property_no, context=f"recover_page_{target_page}_try_{rec_try}"
+            )
+            session = _session_from_cookies(refresh_state["cookies"])
+            state = refresh_state
+            hidden_state = {
+                "__VIEWSTATE": refresh_state["viewstate"],
+                "__VIEWSTATEGENERATOR": refresh_state["viewstate_gen"],
+                "__EVENTVALIDATION": refresh_state["eventvalidation"],
+            }
+
+            milestones = _build_page_milestones(target_page)
+
+            recovery_ok = True
+            for milestone_page in milestones:
+                print(f"[RECOVERY STEP] property={property_no}, page={milestone_page}")
+                ok, reason = _post_page_and_update_hidden(milestone_page)
+                if not ok:
+                    recovery_ok = False
+                    break
+            if recovery_ok:
+                return True
+        return False
 
     page_no = 1
     while True:
@@ -636,11 +696,15 @@ def process_property(property_no: int):
             }
 
             # Rebuild page state in steps: 11, 21, 31 ... up to target page.
-            milestones = list(range(11, next_page + 1, 10))
+            milestones = _build_page_milestones(next_page)
             refresh_ok = True
             for milestone_page in milestones:
                 print(f"[REFRESH PAGE STEP] property={property_no}, page={milestone_page}")
-                if not _post_page_and_update_hidden(milestone_page):
+                ok, reason = _post_page_and_update_hidden(milestone_page)
+                if not ok:
+                    # terminal-like response here can be transient; recover once more
+                    if reason == "terminal" and _recover_and_load_page(milestone_page):
+                        continue
                     refresh_ok = False
                     break
             if not refresh_ok:
@@ -650,7 +714,12 @@ def process_property(property_no: int):
             page_no = next_page
             continue
 
-        if not _post_page_and_update_hidden(next_page):
+        ok, reason = _post_page_and_update_hidden(next_page)
+        if not ok:
+            if reason == "terminal":
+                if _recover_and_load_page(next_page):
+                    page_no = next_page
+                    continue
             break
 
         page_no = next_page
