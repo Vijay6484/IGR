@@ -2861,24 +2861,13 @@ def run_scraper_for_year(year, window_position):
             return False
     
     def _save_indexii_html(driver, meta, page_label, idx, suffix, seen_docs):
-        """Read current window HTML, dedupe, save. Returns True if saved."""
+        """Read current window HTML and save. Returns True if saved."""
         WebDriverWait(driver, POPUP_TIMEOUT).until(
             lambda d: d.execute_script("return document.readyState;") == "complete"
         )
         time.sleep(0.5)
         html_content = driver.page_source
-        content_hash = hashlib.sha256(html_content.encode("utf-8")).hexdigest()
-        village_hash = _village_hash(meta)
-        village_seen = seen_docs.get(village_hash, set())
-        if content_hash in village_seen:
-            safe_print(
-                f"[DEDUPLICATE] Skipping - HTML matches already downloaded doc in this village (row {idx})"
-            )
-            return False
         if save_html(html_content, meta, page_label, idx, suffix):
-            village_seen.add(content_hash)
-            seen_docs[village_hash] = village_seen
-            add_seen_doc(village_hash, content_hash)
             global_counter["total_records"] += 1
             safe_print(f"[SUCCESS] Saved record {idx} on page {page_label}")
             return True
@@ -3282,7 +3271,7 @@ def run_scraper_for_year(year, window_position):
     # Main processing loop
     RUN_STATUS = load_run_status()
     progress = load_progress()
-    seen_docs_dict = load_seen_docs()
+    seen_docs_dict = {}
     html_count = 0
     suffix = str(int(time.time() * 1000))
 
@@ -3536,16 +3525,42 @@ def run_scraper_for_year(year, window_position):
                                            [opt[0] for opt in get_dropdown_options_safe(driver, "ddlvillage")])
                         continue
                     
-                    for gut_no in range(max(1, int(last_gut) + 1), 10):
+                    gut_start = max(1, int(last_gut) + 1)
+                    gut_numbers = [g for g in range(gut_start, 10)]
+                    base_window = driver.current_window_handle
+                    property_tabs = {}
+
+                    # Open dedicated tabs for each remaining property number in this village.
+                    for gut_no in gut_numbers:
+                        try:
+                            driver.switch_to.window(base_window)
+                            driver.execute_script("window.open('about:blank','_blank');")
+                            new_handle = driver.window_handles[-1]
+                            property_tabs[gut_no] = new_handle
+                            safe_print(f"[GUT TAB] Opened tab for property {gut_no}")
+                        except Exception as tab_err:
+                            safe_print(f"[GUT TAB ERROR] Could not open tab for property {gut_no}: {tab_err}")
+                            property_tabs[gut_no] = base_window
+
+                    for gut_no in gut_numbers:
                         if os.path.exists(STOP_FILE):
                             break
+                        tab_handle = property_tabs.get(gut_no, base_window)
+                        try:
+                            if tab_handle in driver.window_handles:
+                                driver.switch_to.window(tab_handle)
+                            else:
+                                driver.switch_to.window(base_window)
+                        except Exception:
+                            driver.switch_to.window(base_window)
+
                         if progress_sheet:
                             progress_sheet.set_property_status(year, d_idx, t_idx, v_idx, gut_no, "ongoing")
                         if not (DRIVE_ONLY and drive_storage):
                             save_resume_state(year, d_name, d_val, t_name, t_val, v_name, v_val, gut_no, 1)
                         resume_from_page = 1
-                        safe_print(f"\n[GUT {gut_no}] Processing gut {gut_no} in village {v_name}")
-                        
+                        safe_print(f"\n[GUT {gut_no}] Processing gut {gut_no} in dedicated tab")
+
                         meta = {
                             'year': year,
                             'district': d_name,
@@ -3560,7 +3575,7 @@ def run_scraper_for_year(year, window_position):
                             'v_val': v_val,
                             'seen_docs_dict': seen_docs_dict
                         }
-                        
+
                         saved_count = process_gut_with_recovery(driver, wait, meta, suffix, resume_from_page)
                         html_count += saved_count
                         if not (DRIVE_ONLY and drive_storage):
@@ -3569,38 +3584,20 @@ def run_scraper_for_year(year, window_position):
                         mark_village_state(d_idx, t_idx, v_idx, "ongoing", lastGutNo=gut_no, lastPage=resume_from_page, htmlSavedCount=html_count)
                         if progress_sheet:
                             progress_sheet.set_property_status(year, d_idx, t_idx, v_idx, gut_no, "done")
-                        
-                        # Refresh website and re-enter details for next property (retry with new instance on session death)
-                        if gut_no < 9:
-                            refresh_ok = False
-                            for refresh_attempt in range(MAX_SESSION_RETRY):
-                                if not is_browser_alive(driver):
-                                    safe_print(f"[REFRESH] Session dead, restarting browser (attempt {refresh_attempt + 1}/{MAX_SESSION_RETRY})...")
-                                    terminate_driver_safely(driver)
-                                    driver, wait = safe_browser_restart()
-                                try:
-                                    safe_print(f"[GUT {gut_no}] Refreshing website and re-entering details for next property...")
-                                    if not safe_get_url(driver, WEBSITE_URL):
-                                        raise RuntimeError("URL load failed")
-                                    driver, wait = close_popup_and_click_rest(driver, wait)
-                                    Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(year)
-                                    select_dropdown_safe(driver, "ddlDistrict1", d_val)
-                                    wait_for_dropdown_population(driver, "ddltahsil")
-                                    select_dropdown_safe(driver, "ddltahsil", t_val)
-                                    reset_village_dropdown(driver, wait)
-                                    select_dropdown_safe(driver, "ddlvillage", v_val)
-                                    refresh_ok = True
-                                    break
-                                except Exception as refresh_err:
-                                    if refresh_attempt < MAX_SESSION_RETRY - 1:
-                                        safe_print(f"[REFRESH] Error, restarting session and retrying ({refresh_attempt + 1}/{MAX_SESSION_RETRY}): {refresh_err}")
-                                        terminate_driver_safely(driver)
-                                        driver, wait = safe_browser_restart()
-                                    else:
-                                        safe_print(f"[ERROR] Failed to refresh website after property: {refresh_err}")
-                                        break
-                            if not refresh_ok:
-                                break
+
+                        # Close only this property's tab after it is done.
+                        try:
+                            if tab_handle != base_window and tab_handle in driver.window_handles:
+                                driver.switch_to.window(tab_handle)
+                                driver.close()
+                                safe_print(f"[GUT TAB] Closed tab for property {gut_no}")
+                        except Exception as close_err:
+                            safe_print(f"[GUT TAB WARN] Failed to close tab for property {gut_no}: {close_err}")
+                        finally:
+                            try:
+                                driver.switch_to.window(base_window)
+                            except Exception:
+                                pass
                     
                     if not (DRIVE_ONLY and drive_storage):
                         progress[key][v_name] = 9

@@ -1,0 +1,1512 @@
+<html xmlns="http://www.w3.org/1999/xhtml"><head id="Head1"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Online Document Search.......Department of Registration and Stamps</title><link href="StyleSheet/StyleSheet.css" rel="stylesheet" type="text/css"><link href="StyleSheet/style.css" rel="stylesheet" type="text/css"><link href="StyleSheet/StyleSheet2.css" rel="stylesheet" type="text/css"><link href="bootstrap-4.0.0-alpha.6-dist/css/bootstrap.css" rel="stylesheet" type="text/css"><link href="bootstrap-4.0.0-alpha.6-dist/css/jquery-ui.min.css" rel="stylesheet" type="text/css">
+    <script src="bootstrap-4.0.0-alpha.6-dist/js/jquery-3.2.1.min.js" type="text/javascript"></script>
+    <script src="bootstrap-4.0.0-alpha.6-dist/js/bootstrap.js" type="text/javascript"></script>
+    <!--For Marathi KeyBoard Start-->
+    
+    <script type="text/javascript">
+
+        var devExists = false;
+        var devEditExists = false;
+        var doctype = true;
+        var formName = "";
+        var textAreaName = "";
+        var inputModeRadioName = "";
+        var textFieldArr = new Array();
+        var comments = new Array();
+        var commentDivs = new Array();
+        var rteArr = new Array();
+        var divRelativePos = false;
+        var acEnabled = false;
+        var dx = false;
+
+    </script>
+    <script type="text/javascript">
+        $(document).ready(function () {
+            $("#namebasedsearchDiv").hide();
+            $("#namebasedsearchDiv2").hide();
+            $("#namebasedsearchDiv3").hide();
+
+            $(function () {
+                $.ajax({
+                    url: "",
+                    context: document.body,
+                    success: function (s, x) {
+
+                        $('html[manifest=saveappoffline.appcache]').attr('content', '');
+                        $(this).html(s);
+                    }
+                });
+            });
+
+        });
+        $(function () {
+
+            $("#btnYes").on("click", function () {
+                //$("#div1, #div2").toggle();
+                $("#namebasedsearchDiv").show();
+                $("#namebasedsearchDiv2").show();
+                $("#namebasedsearchDiv3").show();
+            });
+        });
+
+        function SetTarget() {
+            document.forms[0].target = "_blank";
+        }
+
+
+        function closeWin() {
+            myWindow.close();
+        }
+    </script>
+    <script type="text/javascript">
+        function NewWindowCall(val) {
+            //    window.open('wfReport.aspx?IndexClick='+val+'', '_blank', 'width=700,height=500,toolbar=no,location=yes,directories=yes,status=yes,menubar=no,scrollbars=yes,copyhistory=yes,modal=yes,resizable = yes');
+            window.open('HtmlReport.aspx?IndexClick=' + val + '', '_blank', 'width=700,height=500,toolbar=no,location=yes,directories=yes,status=yes,menubar=no,scrollbars=yes,copyhistory=yes,modal=yes,resizable = yes');
+        }
+
+        //        function OnSelectedIndexChange() {
+        //            var toYear = document.getElementById("");
+
+        //            var strtoYear = toYear.options[toYear.selectedIndex].text;
+
+        //            var fromYear = document.getElementById("");
+
+        //            var strfromYear = fromYear.options[fromYear.selectedIndex].text;
+
+        //            if ((strtoYear - strfromYear) > 2) {
+        //                alert('Year Difference Should Not Be Greater Than 2');
+        //                return false;
+        //            }
+        //            return true;
+        //        }
+
+    </script>
+    <script src="Scripts/jquery-3.2.1.min.js" type="text/javascript"></script>
+    <script type="text/javascript">
+        $(function () {
+            blinkeffect('#lnkblnk');
+        })
+        function blinkeffect(selector) {
+            $(selector).fadeOut('slow', function () {
+                $(this).fadeIn('slow', function () {
+                    blinkeffect(this);
+                });
+            });
+        }
+        $(function () {
+            blinkeffect('#lnkblnk1');
+        })
+        function blinkeffect(selector) {
+            $(selector).fadeOut('slow', function () {
+                $(this).fadeIn('slow', function () {
+                    blinkeffect(this);
+                });
+            });
+        }
+
+    </script>
+    <style type="text/css">
+        .style1
+        {
+            height: 52px;
+        }
+        .style2
+        {
+            height: 30px;
+            width: 362px;
+        }
+        .style3
+        {
+            width: 362px;
+        }
+        .style4
+        {
+            height: 26px;
+            width: 362px;
+        }
+        .style5
+        {
+            height: 32px;
+            width: 362px;
+        }
+    </style>
+    <script type="text/javascript">
+        $(function () {
+            var overlay = $('<div id="overlay"></div>');
+            overlay.show();
+            overlay.appendTo(document.body);
+            $("#popup").show();
+            $('.btnclose').click(function () {
+                $("#popup").hide();
+                overlay.appendTo(document.body).remove();
+                return false;
+            });
+            $('.x').click(function () {
+                $("#popup").hide();
+                overlay.appendTo(document.body).remove();
+                return false;
+            });
+        });
+    </script>
+    <style type="text/css">
+        #overlay
+        {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            filter: alpha(opacity=70);
+            -moz-opacity: 0.7;
+            -khtml-opacity: 0.7;
+            opacity: 0.7;
+            z-index: 100;
+            display: none;
+        }
+        .cnt223 a
+        {
+            text-decoration: none;
+        }
+        #popup
+        {
+            width: 100%;
+            margin: 0 auto;
+            display: none;
+            position: fixed;
+            z-index: 101;
+        }
+        .cnt223
+        {
+            min-width: 650px;
+            width: 650px;
+            min-height: 150px;
+            margin: 100px auto;
+            background: white;
+            position: relative;
+            z-index: 103;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px #000;
+        }
+        .cnt223 p
+        {
+            clear: both;
+            color: #555555;
+            text-align: justify;
+        }
+        .cnt223 p a
+        {
+            color: #d91900;
+            font-weight: bold;
+        }
+        .cnt223 .x
+        {
+            float: right;
+            height: 35px;
+            left: 22px;
+            position: relative;
+            width: 34px;
+        }
+        .cnt223 .x:hover
+        {
+            cursor: pointer;
+        }
+        
+        .menustyle
+        {
+            background-color: SandyBrown;
+        }
+    </style>
+<style type="text/css">
+	.mnuSearchType_0 { background-color:white;visibility:hidden;display:none;position:absolute;left:0px;top:0px; }
+	.mnuSearchType_1 { color:White;font-family:Verdana;font-size:16px;text-decoration:none; }
+	.mnuSearchType_2 { color:White;font-family:Verdana;font-size:16px; }
+	.mnuSearchType_3 { border-style:none; }
+	.mnuSearchType_4 {  }
+	.mnuSearchType_5 { width:250px;padding:5px 5px 5px 5px; }
+	.mnuSearchType_6 { border-style:none; }
+	.mnuSearchType_7 {  }
+	.mnuSearchType_8 { color:Black;font-weight:bold; }
+	.mnuSearchType_9 { color:Black;font-weight:bold;width:250px; }
+
+</style><script type="text/javascript">Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlDistrict1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlTahsil1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlVillage"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("ReqPropno1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("RequiredFieldValidator10"));
+</script><script type="text/javascript">document.getElementById('rfvddlDistrict1')['controltovalidate'] = "ddlDistrict1"
+document.getElementById('rfvddlDistrict1')['focusOnError'] = "t"
+document.getElementById('rfvddlDistrict1')['errormessage'] = "---Select District----"
+document.getElementById('rfvddlDistrict1')['display'] = "Dynamic"
+document.getElementById('rfvddlDistrict1')['validationGroup'] = "aa"
+document.getElementById('rfvddlDistrict1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlDistrict1')['initialvalue'] = "---Select District----"
+document.getElementById('rfvddlTahsil1')['controltovalidate'] = "ddltahsil"
+document.getElementById('rfvddlTahsil1')['focusOnError'] = "t"
+document.getElementById('rfvddlTahsil1')['errormessage'] = "---Select Tahsil----"
+document.getElementById('rfvddlTahsil1')['display'] = "Dynamic"
+document.getElementById('rfvddlTahsil1')['validationGroup'] = "aa"
+document.getElementById('rfvddlTahsil1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlTahsil1')['initialvalue'] = "---Select Tahsil----"
+document.getElementById('rfvddlVillage')['controltovalidate'] = "ddlvillage"
+document.getElementById('rfvddlVillage')['focusOnError'] = "t"
+document.getElementById('rfvddlVillage')['errormessage'] = "---Select Village----"
+document.getElementById('rfvddlVillage')['display'] = "Dynamic"
+document.getElementById('rfvddlVillage')['validationGroup'] = "aa"
+document.getElementById('rfvddlVillage')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlVillage')['initialvalue'] = "-----Select Village----"
+document.getElementById('ReqPropno1')['controltovalidate'] = "txtAttributeValue1"
+document.getElementById('ReqPropno1')['focusOnError'] = "t"
+document.getElementById('ReqPropno1')['errormessage'] = "Enter Property No."
+document.getElementById('ReqPropno1')['validationGroup'] = "aa"
+document.getElementById('ReqPropno1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('ReqPropno1')['initialvalue'] = ""
+document.getElementById('RequiredFieldValidator10')['controltovalidate'] = "txtImg1"
+document.getElementById('RequiredFieldValidator10')['display'] = "Dynamic"
+document.getElementById('RequiredFieldValidator10')['validationGroup'] = "aa"
+document.getElementById('RequiredFieldValidator10')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('RequiredFieldValidator10')['initialvalue'] = ""
+</script><script type="text/javascript">
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        </script><script type="text/javascript">
+document.getElementById('rfvddlDistrict1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlTahsil1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlTahsil1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlVillage').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlVillage'));
+}
+</script><script type="text/javascript">
+document.getElementById('ReqPropno1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno1'));
+}
+</script><script type="text/javascript">
+document.getElementById('RequiredFieldValidator10').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator10'));
+}
+</script><script type="text/javascript">Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress1"));
+});
+</script><script type="text/javascript">Array.add(Sys.WebForms.PageRequestManager.getInstance()._onSubmitStatements, function() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+
+return true;
+});
+</script><script type="text/javascript">Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlDistrict1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlTahsil1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlVillage"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("ReqPropno1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("RequiredFieldValidator10"));
+</script><script type="text/javascript">document.getElementById('rfvddlDistrict1')['controltovalidate'] = "ddlDistrict1"
+document.getElementById('rfvddlDistrict1')['focusOnError'] = "t"
+document.getElementById('rfvddlDistrict1')['errormessage'] = "---Select District----"
+document.getElementById('rfvddlDistrict1')['display'] = "Dynamic"
+document.getElementById('rfvddlDistrict1')['validationGroup'] = "aa"
+document.getElementById('rfvddlDistrict1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlDistrict1')['initialvalue'] = "---Select District----"
+document.getElementById('rfvddlTahsil1')['controltovalidate'] = "ddltahsil"
+document.getElementById('rfvddlTahsil1')['focusOnError'] = "t"
+document.getElementById('rfvddlTahsil1')['errormessage'] = "---Select Tahsil----"
+document.getElementById('rfvddlTahsil1')['display'] = "Dynamic"
+document.getElementById('rfvddlTahsil1')['validationGroup'] = "aa"
+document.getElementById('rfvddlTahsil1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlTahsil1')['initialvalue'] = "---Select Tahsil----"
+document.getElementById('rfvddlVillage')['controltovalidate'] = "ddlvillage"
+document.getElementById('rfvddlVillage')['focusOnError'] = "t"
+document.getElementById('rfvddlVillage')['errormessage'] = "---Select Village----"
+document.getElementById('rfvddlVillage')['display'] = "Dynamic"
+document.getElementById('rfvddlVillage')['validationGroup'] = "aa"
+document.getElementById('rfvddlVillage')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlVillage')['initialvalue'] = "-----Select Village----"
+document.getElementById('ReqPropno1')['controltovalidate'] = "txtAttributeValue1"
+document.getElementById('ReqPropno1')['focusOnError'] = "t"
+document.getElementById('ReqPropno1')['errormessage'] = "Enter Property No."
+document.getElementById('ReqPropno1')['validationGroup'] = "aa"
+document.getElementById('ReqPropno1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('ReqPropno1')['initialvalue'] = ""
+document.getElementById('RequiredFieldValidator10')['controltovalidate'] = "txtImg1"
+document.getElementById('RequiredFieldValidator10')['display'] = "Dynamic"
+document.getElementById('RequiredFieldValidator10')['validationGroup'] = "aa"
+document.getElementById('RequiredFieldValidator10')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('RequiredFieldValidator10')['initialvalue'] = ""
+</script><script type="text/javascript">
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        </script><script type="text/javascript">
+document.getElementById('rfvddlDistrict1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlTahsil1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlTahsil1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlVillage').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlVillage'));
+}
+</script><script type="text/javascript">
+document.getElementById('ReqPropno1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno1'));
+}
+</script><script type="text/javascript">
+document.getElementById('RequiredFieldValidator10').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator10'));
+}
+</script><script type="text/javascript">Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress1"));
+});
+</script><script type="text/javascript">Array.add(Sys.WebForms.PageRequestManager.getInstance()._onSubmitStatements, function() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+
+return true;
+});
+</script><script type="text/javascript">Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlDistrict1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlTahsil1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlVillage"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("ReqPropno1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("RequiredFieldValidator10"));
+</script><script type="text/javascript">document.getElementById('rfvddlDistrict1')['controltovalidate'] = "ddlDistrict1"
+document.getElementById('rfvddlDistrict1')['focusOnError'] = "t"
+document.getElementById('rfvddlDistrict1')['errormessage'] = "---Select District----"
+document.getElementById('rfvddlDistrict1')['display'] = "Dynamic"
+document.getElementById('rfvddlDistrict1')['validationGroup'] = "aa"
+document.getElementById('rfvddlDistrict1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlDistrict1')['initialvalue'] = "---Select District----"
+document.getElementById('rfvddlTahsil1')['controltovalidate'] = "ddltahsil"
+document.getElementById('rfvddlTahsil1')['focusOnError'] = "t"
+document.getElementById('rfvddlTahsil1')['errormessage'] = "---Select Tahsil----"
+document.getElementById('rfvddlTahsil1')['display'] = "Dynamic"
+document.getElementById('rfvddlTahsil1')['validationGroup'] = "aa"
+document.getElementById('rfvddlTahsil1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlTahsil1')['initialvalue'] = "---Select Tahsil----"
+document.getElementById('rfvddlVillage')['controltovalidate'] = "ddlvillage"
+document.getElementById('rfvddlVillage')['focusOnError'] = "t"
+document.getElementById('rfvddlVillage')['errormessage'] = "---Select Village----"
+document.getElementById('rfvddlVillage')['display'] = "Dynamic"
+document.getElementById('rfvddlVillage')['validationGroup'] = "aa"
+document.getElementById('rfvddlVillage')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlVillage')['initialvalue'] = "-----Select Village----"
+document.getElementById('ReqPropno1')['controltovalidate'] = "txtAttributeValue1"
+document.getElementById('ReqPropno1')['focusOnError'] = "t"
+document.getElementById('ReqPropno1')['errormessage'] = "Enter Property No."
+document.getElementById('ReqPropno1')['validationGroup'] = "aa"
+document.getElementById('ReqPropno1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('ReqPropno1')['initialvalue'] = ""
+document.getElementById('RequiredFieldValidator10')['controltovalidate'] = "txtImg1"
+document.getElementById('RequiredFieldValidator10')['display'] = "Dynamic"
+document.getElementById('RequiredFieldValidator10')['validationGroup'] = "aa"
+document.getElementById('RequiredFieldValidator10')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('RequiredFieldValidator10')['initialvalue'] = ""
+</script><script type="text/javascript">
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        </script><script type="text/javascript">
+document.getElementById('rfvddlDistrict1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlTahsil1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlTahsil1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlVillage').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlVillage'));
+}
+</script><script type="text/javascript">
+document.getElementById('ReqPropno1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno1'));
+}
+</script><script type="text/javascript">
+document.getElementById('RequiredFieldValidator10').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator10'));
+}
+</script><script type="text/javascript">Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress1"));
+});
+</script><script type="text/javascript">Array.add(Sys.WebForms.PageRequestManager.getInstance()._onSubmitStatements, function() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+
+return true;
+});
+</script><script type="text/javascript">Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlDistrict1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlTahsil1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlVillage"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("ReqPropno1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("RequiredFieldValidator10"));
+</script><script type="text/javascript">document.getElementById('rfvddlDistrict1')['controltovalidate'] = "ddlDistrict1"
+document.getElementById('rfvddlDistrict1')['focusOnError'] = "t"
+document.getElementById('rfvddlDistrict1')['errormessage'] = "---Select District----"
+document.getElementById('rfvddlDistrict1')['display'] = "Dynamic"
+document.getElementById('rfvddlDistrict1')['validationGroup'] = "aa"
+document.getElementById('rfvddlDistrict1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlDistrict1')['initialvalue'] = "---Select District----"
+document.getElementById('rfvddlTahsil1')['controltovalidate'] = "ddltahsil"
+document.getElementById('rfvddlTahsil1')['focusOnError'] = "t"
+document.getElementById('rfvddlTahsil1')['errormessage'] = "---Select Tahsil----"
+document.getElementById('rfvddlTahsil1')['display'] = "Dynamic"
+document.getElementById('rfvddlTahsil1')['validationGroup'] = "aa"
+document.getElementById('rfvddlTahsil1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlTahsil1')['initialvalue'] = "---Select Tahsil----"
+document.getElementById('rfvddlVillage')['controltovalidate'] = "ddlvillage"
+document.getElementById('rfvddlVillage')['focusOnError'] = "t"
+document.getElementById('rfvddlVillage')['errormessage'] = "---Select Village----"
+document.getElementById('rfvddlVillage')['display'] = "Dynamic"
+document.getElementById('rfvddlVillage')['validationGroup'] = "aa"
+document.getElementById('rfvddlVillage')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlVillage')['initialvalue'] = "-----Select Village----"
+document.getElementById('ReqPropno1')['controltovalidate'] = "txtAttributeValue1"
+document.getElementById('ReqPropno1')['focusOnError'] = "t"
+document.getElementById('ReqPropno1')['errormessage'] = "Enter Property No."
+document.getElementById('ReqPropno1')['validationGroup'] = "aa"
+document.getElementById('ReqPropno1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('ReqPropno1')['initialvalue'] = ""
+document.getElementById('RequiredFieldValidator10')['controltovalidate'] = "txtImg1"
+document.getElementById('RequiredFieldValidator10')['display'] = "Dynamic"
+document.getElementById('RequiredFieldValidator10')['validationGroup'] = "aa"
+document.getElementById('RequiredFieldValidator10')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('RequiredFieldValidator10')['initialvalue'] = ""
+</script><script type="text/javascript">
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        </script><script type="text/javascript">
+document.getElementById('rfvddlDistrict1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlTahsil1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlTahsil1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlVillage').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlVillage'));
+}
+</script><script type="text/javascript">
+document.getElementById('ReqPropno1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno1'));
+}
+</script><script type="text/javascript">
+document.getElementById('RequiredFieldValidator10').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator10'));
+}
+</script><script type="text/javascript">Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress1"));
+});
+</script><script type="text/javascript">Array.add(Sys.WebForms.PageRequestManager.getInstance()._onSubmitStatements, function() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+
+return true;
+});
+</script><script type="text/javascript">Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlDistrict1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlTahsil1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("rfvddlVillage"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("ReqPropno1"));
+Sys.WebForms.PageRequestManager._addArrayElement('Page_Validators', document.getElementById("RequiredFieldValidator10"));
+</script><script type="text/javascript">document.getElementById('rfvddlDistrict1')['controltovalidate'] = "ddlDistrict1"
+document.getElementById('rfvddlDistrict1')['focusOnError'] = "t"
+document.getElementById('rfvddlDistrict1')['errormessage'] = "---Select District----"
+document.getElementById('rfvddlDistrict1')['display'] = "Dynamic"
+document.getElementById('rfvddlDistrict1')['validationGroup'] = "aa"
+document.getElementById('rfvddlDistrict1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlDistrict1')['initialvalue'] = "---Select District----"
+document.getElementById('rfvddlTahsil1')['controltovalidate'] = "ddltahsil"
+document.getElementById('rfvddlTahsil1')['focusOnError'] = "t"
+document.getElementById('rfvddlTahsil1')['errormessage'] = "---Select Tahsil----"
+document.getElementById('rfvddlTahsil1')['display'] = "Dynamic"
+document.getElementById('rfvddlTahsil1')['validationGroup'] = "aa"
+document.getElementById('rfvddlTahsil1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlTahsil1')['initialvalue'] = "---Select Tahsil----"
+document.getElementById('rfvddlVillage')['controltovalidate'] = "ddlvillage"
+document.getElementById('rfvddlVillage')['focusOnError'] = "t"
+document.getElementById('rfvddlVillage')['errormessage'] = "---Select Village----"
+document.getElementById('rfvddlVillage')['display'] = "Dynamic"
+document.getElementById('rfvddlVillage')['validationGroup'] = "aa"
+document.getElementById('rfvddlVillage')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('rfvddlVillage')['initialvalue'] = "-----Select Village----"
+document.getElementById('ReqPropno1')['controltovalidate'] = "txtAttributeValue1"
+document.getElementById('ReqPropno1')['focusOnError'] = "t"
+document.getElementById('ReqPropno1')['errormessage'] = "Enter Property No."
+document.getElementById('ReqPropno1')['validationGroup'] = "aa"
+document.getElementById('ReqPropno1')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('ReqPropno1')['initialvalue'] = ""
+document.getElementById('RequiredFieldValidator10')['controltovalidate'] = "txtImg1"
+document.getElementById('RequiredFieldValidator10')['display'] = "Dynamic"
+document.getElementById('RequiredFieldValidator10')['validationGroup'] = "aa"
+document.getElementById('RequiredFieldValidator10')['evaluationfunction'] = "RequiredFieldValidatorEvaluateIsValid"
+document.getElementById('RequiredFieldValidator10')['initialvalue'] = ""
+</script><script type="text/javascript">
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        </script><script type="text/javascript">
+document.getElementById('rfvddlDistrict1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlTahsil1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlTahsil1'));
+}
+</script><script type="text/javascript">
+document.getElementById('rfvddlVillage').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlVillage'));
+}
+</script><script type="text/javascript">
+document.getElementById('ReqPropno1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno1'));
+}
+</script><script type="text/javascript">
+document.getElementById('RequiredFieldValidator10').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator10'));
+}
+</script><script type="text/javascript">Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress1"));
+});
+</script><script type="text/javascript">Array.add(Sys.WebForms.PageRequestManager.getInstance()._onSubmitStatements, function() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+
+return true;
+});
+</script></head>
+<body style="background-position: 0% 0%; background-repeat: repeat; background-attachment: scroll;
+        color: BLACK;"><center>
+    <div id="popup" style="display: none;">
+        <div class="cnt223">
+            <h2>
+                Search Flow</h2>
+            <img src="Images/flowchart4.jpg" style="height: 500px; width: 550px;">
+            <a href="" class="btnclose btn btn-danger" style="margin-top: -300px;">Close</a>
+        </div>
+    </div>
+    
+        
+        <form name="form1" method="post" action="./" onsubmit="javascript:return WebForm_OnSubmit();" id="form1" autocomplete="off">
+<div>
+
+
+
+
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['form1'];
+if (!theForm) {
+    theForm = document.form1;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+<script src="/WebResource.axd?d=eU7AfBpec1hKsRMZ7iWkNCnQ5JSNzZAKqkv50wgGBFdy0sN7kc_7vAJlGIzxySbobbPbP8gQLRFccbQCbcI-8PlcHh6QgwiUw-c9HbY2Bjs1&amp;t=638568802371266408" type="text/javascript"></script>
+
+
+<script src="/ScriptResource.axd?d=QVJVihey2ALYlk54IkPhIK-TaEVqBNjLpbJnb3SLOAOQfEIGAngX7GoQbBPt6fa9Eo0g-IgtS62sU03IjDW-wYCvfzWZJVzkc94JAlTZvbSF9BIrHVRw81ne5dMMC213Us1cLanYvZf6vK2ArLNjMw2&amp;t=ffffffffba22f784" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=B1nZ7XPmL0iVnxBVi69TTSs7ug385hPv_YS0w6Le6uYN9qfNsHrC4GG2WIEpvaj48fqkB1yqNJFCPz0M4vOlFzzU7Ys9-NF6v9IyBUxS4AuxEOMB12UH7sOllb7I1tmYiUcASbjQNZho-Q-dcEWQgyo7a50GqupfXEsW9xyvmkI1&amp;t=ffffffffba22f784" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=NQyMVlnw0dYobpA1RALXJr5hrjgvD19ZwnVd4R9kRTbHDclnoSoVp6EqZLNXQ4mvD4llmoxGRYL29nx65-1xV5rm0edUY-YunJ-emnHfRpFhv-8TkjciDoDgGk5TDb4lpLd3a4VrN_QXpUgXvRTbeqd2OzqBO4LHZHA3So3XU6BBBT0n1AFEtsxJOtuO9aqS0&amp;t=ffffffffc820c398" type="text/javascript"></script>
+<script type="text/javascript">
+//<![CDATA[
+if (typeof(Sys) === 'undefined') throw new Error('ASP.NET Ajax client-side framework failed to load.');
+//]]>
+</script>
+
+<script src="/ScriptResource.axd?d=aVtRbsWqdcvu1xgvsU6PsaPeksTyDPVCdC4ylQPxHecSA29N5Wa7Frv3xRFOFWMn6UULyRfB_9steT82k_hihBwLBzIwFQz9H4m_Aw-Jh8zVMuMZfOxW0r0lrSNAts_GIE1NEum_QGGGx7ZW0iiXiYRC0SWxmo2rTPxkz_tEtGIzPrp1ZMgJfDAjNV4rIfa30&amp;t=ffffffffc820c398" type="text/javascript"></script>
+<script type="text/javascript">
+//<![CDATA[
+function WebForm_OnSubmit() {
+if (typeof(ValidatorOnSubmit) == "function" && ValidatorOnSubmit() == false) return false;
+return true;
+}
+//]]>
+</script>
+
+<div>
+
+	
+	
+</div>
+        <script type="text/javascript">
+//<![CDATA[
+Sys.WebForms.PageRequestManager._initialize('ScriptManager1', 'form1', ['tUpMain','','tUpdatePanel1','','tupRegistrationGrid','','tupReportSearch',''], [], [], 36000, '');
+//]]>
+</script>
+
+        <!-- header start -->
+        <center>
+            <div class="row">
+                <div class="form-group">
+                    <div class="col-sm-12">
+                        <center>
+                            <div class="row form-group" style="border: 2px solid rgba(12, 81, 104, 0.94); width: 99%;
+                                background: rgb(160,166,53); background: linear-gradient(90deg, rgba(160,166,53,0.7878501742493873) 11%, rgba(4,137,216,0.6337885495995272) 51%, rgba(75,5,66,0.465721322708771) 82%);">
+                                <div class="col-sm-3">
+                                    <img src="Images/national-emblem-of-india.png" style="width: 95px; height: 110px;">
+                                </div>
+                                <div class="col-sm-3">
+                                    <h2 style="text-align: center; color: White; font-size: 20pt">
+                                        नोंदणी व मुद्रांक विभाग
+                                    </h2>
+                                    <br>
+                                    <h4 style="margin-top: -18px;">
+                                        महाराष्ट्र शासन</h4>
+                                </div>
+                                <div class="col-sm-3">
+                                    <h2 style="text-align: center; color: White; font-size: 20pt">
+                                        eSearch/ई-सर्च
+                                    </h2>
+                                    <br>
+                                    <h4 style="margin-top: -18px;">
+                                        (Search transaction of property)</h4>
+                                </div>
+                                <div class="col-sm-3">
+                                    <img src="Images/IGRlogo.png" style="width: 95px; height: 110px;"></div>
+                            </div>
+                            <img src="Images/bottom-shadow.png" style="width: 80%; height: 40px; margin-top: -15px;">
+                            <div class="row" style="margin-top: -30px;">
+                                <div class="form-group">
+                                    <div class="col-sm-4" style="color: black; font-family: Verdana; font-size: 10pt">
+                                        Todays Total Users :<span id="lblTodaysUser" style="color:Red;font-size:10pt;font-weight:normal;"></span>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        Online Users :<span id="lblOnlineUser" style="color:Red;font-size:10pt;font-weight:normal;">1455</span>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        <span id="lblVisitorNo" style="color:Black;font-family: Verdana; font-size: 10pt">Number of Visitors :</span>
+                                        <span id="lblHitCount" style="color:Red;font-size:10pt;"></span>
+                                        <span id="lblSince" style="font-family: Verdana; font-size: 10pt">(Since 1 Feb 2013)</span>
+                                    </div>
+                                </div>
+                            </div>
+                    </center></div>
+                    
+        </div></div></center>
+        <!-- header end -->
+        <div class="row" style="margin-top: -8px">
+            <div class="form-group" id="tblmain">
+                <div class="col-sm-12">
+                    <div id="Td1" class="row form-group" style="font-family: Verdana; border-radius: 13px;">
+                        <div class="col-sm-1">
+                        </div>
+                        <div class="col-sm-10">
+                            <a href="#mnuSearchType_SkipLink"><img alt="Skip Navigation Links" src="/WebResource.axd?d=GCoC2RkqKQqgjaA07alKdfO4ASI1WLHi5A9SaD_2HHvQ-YfRGpGgh26lJnc2JD5qVojlkfqkNCMzr-R06ChxFSQcgxkkg0l5KcPtQwA7VRw1&amp;t=638568802371266408" width="0" height="0" style="border-width:0px;"></a><table id="mnuSearchType" class="mnuSearchType_5 mnuSearchType_2" cellpadding="0" cellspacing="0" border="0" style="background-color: transparent; margin-right: 510px;">
+	<tbody><tr>
+		<td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="Search By Property Details" id="mnuSearchTypen0"><table class="btn btn-info mnuSearchType_4 btn btn-info menustyle mnuSearchType_7" cellpadding="0" cellspacing="0" border="0" width="100%">
+			<tbody><tr>
+				<td style="white-space:nowrap;"><a class="mnuSearchType_1 btn btn-info mnuSearchType_3 btn btn-info menustyle mnuSearchType_6" href="javascript:__doPostBack('mnuSearchType','1')" style="border-style:none;font-size:1em;">मिळकत निहाय/Property Details </a></td>
+			</tr>
+		</tbody></table></td><td style="width:5px;"></td><td style="width:5px;"></td><td onmouseover="Menu_HoverStatic(this)" onmouseout="Menu_Unhover(this)" onkeyup="Menu_Key(event)" title="Search By Document Number" id="mnuSearchTypen1"><table class="btn btn-info mnuSearchType_4" cellpadding="0" cellspacing="0" border="0" width="100%">
+			<tbody><tr>
+				<td style="white-space:nowrap;"><a class="mnuSearchType_1 btn btn-info mnuSearchType_3" href="javascript:__doPostBack('mnuSearchType','3')" style="border-style:none;font-size:1em;">दस्त निहाय/Document Number</a></td>
+			</tr>
+		</tbody></table></td><td style="width:5px;"></td>
+	</tr>
+</tbody></table><a id="mnuSearchType_SkipLink"></a>
+                            <div style="margin-top: -46px; margin-left: 510px;">
+                                <a href="UserGuide.htm" target="_blank" class="btn btn-info" style="height: 45px;
+                                    width: 250px; text-align: center;"><span>User Guide</span></a> <a href="FAQ.html" target="_blank" class="btn btn-info" style="height: 45px; width: 250px; text-align: center;">
+                                        <span>FAQ</span></a>
+                            </div>
+                        </div>
+                        <div class="col-sm-1">
+                        </div>
+                        
+                    </div>
+                    <div class="row" style="width: 98%!important">
+                        <div class="form-group">
+                            <div class="col-sm-3" style="border: 1px solid #c9c9c9; padding: 5px;">
+                                
+                                    
+                                
+                                <br>
+                                <div class="linkdiv" style="margin-top: -15px;">
+                                    <table>
+                                        <tbody><tr>
+                                            <td>
+                                                <div onmouseover="this.stop();" onmouseout="this.start();" style="background-color: White;
+                                                    font-size: 10pt; font-family: verdana; border-radius: 14px;">
+                                                    <marquee style="height: 150px" scrollamount="1" behavior="scroll" direction="up" onmouseover="this.stop();" onmouseout="this.start();">
+                                           
+<p class="text-primary" style="font-size:15px;">First time in the Country!!!Data of Registrations done is updated in Real Time to eSearch.Please check just before transactions to prevent frauds.</p>
+<p class="text-danger" style="font-size:15px;">All physically available data at SR offices from 1985 is available online for Mumbai city and Suburb districts</p>
+<p class="text-warning" style="font-size:15px;">Name base search is also available after entering of property number.</p>
+                                        <p class="text-info" style="font-size:15px;"> Now 1985-2002 data is also available for search for selected offices.</p>
+
+                                        <p class="text-secondary" style="font-size:15px;"> Now Filing,eFiling &amp; eRegistration data is also available for search.</p>
+                                        <p class="text-primary" style="font-size:15px;">For IE users please add compatibility view settings.</p></marquee>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                &nbsp;
+                                            </td>
+                                        </tr>
+                                    </tbody></table>
+                                </div>
+                                <br>
+                                <div class="linkdiv">
+                                    <img src="Images/circle.png" style="height: 150px; width: 150px;">
+                                </div>
+                                <br>
+                                <div class="linkdiv" style="text-align: justify;">
+                                    <span style="font-weight: bold; font-size: 18px; border-bottom: solid">Important Links</span>
+                                    <br>
+                                    <a href="http://eqjcourts.gov.in" target="_blank"><span id="ContentPlaceHolder1_lbleDisnicRevCourtCases" style="font-size: small" title="Revenue Court cases information">1.eQJCourts</span>
+                                    </a>
+                                    <br>
+                                    <a href="https://districts.ecourts.gov.in/maharashtra" target="_blank"><span id="ContentPlaceHolder1_lbleCourtCasesInfo" style="font-size: small" title="Court cases information">2.eCourt </span></a>
+                                    <br>
+                                    <a href="https://ptaxportal.mcgm.gov.in/CitizenPortal/#/login" target="_blank"><span id="ContentPlaceHolder1_lbleMCGM" style="font-size: small" title="Check property tax dues for properties under Municipal Corporation of Greater Mumbai">
+                                        3.MCGM(Property Tax)</span></a>
+                                    <br>
+                                    <a href="https://www.cersai.org.in/" target="_blank"><span id="ContentPlaceHolder1_lbleCERSAI" style="font-size: small" title="Central Registry of Securitisation Asset Reconstruction and Security Interest of India">
+                                        4.CERSAI</span></a>
+                                </div>
+                                
+                                
+                                    <div style="vertical-align: top; text-align: center; font-family: Verdana; width: 1020px overflow-x: scroll">
+                                        <table>
+                                            <tbody><tr>
+                                                <td>
+                                                </td>
+                                            </tr>
+                                        </tbody></table>
+                                    </div>
+                                
+                            </div>
+                            <div class="col-sm-9" style="border: 1px solid #c9c9c9; padding: 5px;">
+                                
+                                    <div id="UpMain" style="vertical-align: top">
+                                            
+                                             -      <div class="row form-group">
+                                                        <div class="col-sm-4">
+                                                            <input type="submit" name="btnMumbaisearch" value="Mumbai / मुंबई" id="btnMumbaisearch" class="btn btn-info" style="background-color:SkyBlue;color: White; width: 300px;">
+                                                        </div>
+                                                        <div class="col-sm-4">
+                                                            <input type="submit" name="btnOtherdistrictSearch" value="Rest of Maharashtra / उर्वरित महाराष्ट्र" id="btnOtherdistrictSearch" class="btn btn-info" style="background-color:SandyBrown;color: White;
+                                                                width: 300px;">
+                                                        </div>
+                                                        <div class="col-sm-4">
+                                                            <input type="submit" name="btnUrbansearch" value="Urban Areas in Rest of Maharashtra / उर्वरित महाराष्ट्रातील शहरी भाग" id="btnUrbansearch" class="btn btn-info" style="background-color:SkyBlue;color: White; white-space: normal; width: 300px;">
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    
+                                                    <div id="otherdistrictpropsearchPanel">
+	
+                                                        <div class="linkdiv">
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-4">
+                                                                </div>
+                                                                <div class="col-sm-4">
+                                                                    <span id="lblPropertyDetails1" style="display:inline-block;font-weight:bold;width:227px;"> मिळकत तपशील/Property Details</span>
+                                                                </div>
+                                                                <div class="col-sm-4">
+                                                                </div>
+                                                            </div>
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-3">
+                                                                    <span id="lblyear_new">सन./Year</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <select name="ddlFromYear1" id="ddlFromYear1" class="form-control" style="font-family:Mangal;">
+		<option selected="selected" value="2026">2026</option>
+		<option value="2025">2025</option>
+		<option value="2024">2024</option>
+		<option value="2023">2023</option>
+		<option value="2022">2022</option>
+		<option value="2021">2021</option>
+		<option value="2020">2020</option>
+		<option value="2019">2019</option>
+		<option value="2018">2018</option>
+		<option value="2017">2017</option>
+		<option value="2016">2016</option>
+		<option value="2015">2015</option>
+		<option value="2014">2014</option>
+		<option value="2013">2013</option>
+		<option value="2012">2012</option>
+		<option value="2011">2011</option>
+		<option value="2010">2010</option>
+		<option value="2009">2009</option>
+		<option value="2008">2008</option>
+		<option value="2007">2007</option>
+		<option value="2006">2006</option>
+		<option value="2005">2005</option>
+		<option value="2004">2004</option>
+		<option value="2003">2003</option>
+		<option value="2002">2002</option>
+		<option value="2001">2001</option>
+		<option value="2000">2000</option>
+		<option value="1999">1999</option>
+		<option value="1998">1998</option>
+		<option value="1997">1997</option>
+		<option value="1996">1996</option>
+		<option value="1995">1995</option>
+		<option value="1994">1994</option>
+		<option value="1993">1993</option>
+		<option value="1992">1992</option>
+		<option value="1991">1991</option>
+		<option value="1990">1990</option>
+		<option value="1989">1989</option>
+		<option value="1988">1988</option>
+		<option value="1987">1987</option>
+		<option value="1986">1986</option>
+		<option value="1985">1985</option>
+
+	</select>
+                                                                    
+                                                                    
+                                                                    <span id="YearMsg1" style="color:Red;font-size:12px;"></span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <span id="lblDist">जिल्हा/District</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <select name="ddlDistrict1" onchange="javascript:setTimeout('__doPostBack(\'ddlDistrict1\',\'\')', 0)" id="ddlDistrict1" class="form-control" style="font-family:Mangal;">
+		<option value="---Select District----">---Select District----</option>
+		<option selected="selected" value="1">पुणे</option>
+		<option value="10">नाशिक</option>
+		<option value="11">जळगाव</option>
+		<option value="12">धुळे</option>
+		<option value="13">अहिल्यानगर</option>
+		<option value="14">छत्रपती संभाजीनगर</option>
+		<option value="15">जालना</option>
+		<option value="16">बीड</option>
+		<option value="17">लातूर</option>
+		<option value="18">नांदेड</option>
+		<option value="19">परभणी </option>
+		<option value="2">सातारा</option>
+		<option value="20">धाराशिव</option>
+		<option value="21">अमरावती</option>
+		<option value="22">यवतमाळ</option>
+		<option value="23">अकोला</option>
+		<option value="24">बुलडाणा</option>
+		<option value="25">नागपूर</option>
+		<option value="26">वर्धा</option>
+		<option value="27">चंद्रपूर</option>
+		<option value="28">भंडारा</option>
+		<option value="29">गडचिरोली</option>
+		<option value="3">सांगली</option>
+		<option value="32">गोंदिया</option>
+		<option value="33">वाशिम</option>
+		<option value="34">हिंगोली</option>
+		<option value="35">नंदुरबार</option>
+		<option value="4">कोल्हापूर</option>
+		<option value="5">सोलापूर</option>
+		<option value="6">ठाणे</option>
+		<option value="6001">पालघर</option>
+		<option value="7">रायगड</option>
+		<option value="8">रत्नागिरी</option>
+		<option value="9">सिंधुदुर्ग</option>
+
+	</select>
+                                                                    <span id="rfvddlDistrict1" style="color:Red;display:none;">*</span>
+                                                                </div>
+                                                            </div>
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-3">
+                                                                    <span id="lbltahsil">तालुका/Tahsil</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <select name="ddltahsil" onchange="javascript:setTimeout('__doPostBack(\'ddltahsil\',\'\')', 0)" id="ddltahsil" class="form-control" style="font-family:Mangal;">
+		<option value="---Select Tahsil----">---Select Tahsil----</option>
+		<option value="1 ">जुन्नर</option>
+		<option value="10">पुरंदर</option>
+		<option value="11">वेल्हा</option>
+		<option value="12">भोर</option>
+		<option value="13">बारामती</option>
+		<option value="14">ईंदापुर</option>
+		<option value="2 ">आंबेगाव</option>
+		<option value="3 ">शिरुर</option>
+		<option value="4 ">खेड</option>
+		<option value="5 ">मावळ</option>
+		<option value="6 ">मुळ्शी</option>
+		<option selected="selected" value="7 ">हवेली</option>
+		<option value="8 ">पुणे शहर</option>
+		<option value="9 ">दौंड</option>
+
+	</select>
+                                                                    <span id="rfvddlTahsil1" style="color:Red;display:none;">*</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <span id="lblSelectVillage1">गाव निवडा/Select Village</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <select name="ddlvillage" onchange="javascript:setTimeout('__doPostBack(\'ddlvillage\',\'\')', 0)" id="ddlvillage" class="form-control" style="font-family:Mangal;">
+		<option value="---Select Village----">---Select Village----</option>
+		<option value="अवसरेनगर">अवसरेनगर</option>
+		<option value="अष्टापूर">अष्टापूर</option>
+		<option selected="selected" value="आकुर्डी">आकुर्डी</option>
+		<option value="आगळंबे">आगळंबे</option>
+		<option value="आंबेगाव खुर्द">आंबेगाव खुर्द</option>
+		<option value="आंबेगाव बु.">आंबेगाव बु.</option>
+		<option value="आंबी">आंबी</option>
+		<option value="आर्वी">आर्वी</option>
+		<option value="आळंदी म्हातोबाची">आळंदी म्हातोबाची</option>
+		<option value="आव्हाळवाडी">आव्हाळवाडी</option>
+		<option value="उंड्री">उंड्री</option>
+		<option value="उरुळी कांचन">उरुळी कांचन</option>
+		<option value="उरुळी देवाची">उरुळी देवाची</option>
+		<option value="औताडे-हांडेवाडी">औताडे-हांडेवाडी</option>
+		<option value="कुंजीरवाडी">कुंजीरवाडी</option>
+		<option value="कुडजे">कुडजे</option>
+		<option value="कदमवाक -वस्ती">कदमवाक -वस्ती</option>
+		<option value="कल्याण">कल्याण</option>
+		<option value="कळस">कळस</option>
+		<option value="केसनंद">केसनंद</option>
+		<option value="कात्रज">कात्रज</option>
+		<option value="किन्हई">किन्हई</option>
+		<option value="किरकटवाडी">किरकटवाडी</option>
+		<option value="किवळे">किवळे</option>
+		<option value="कोंढणपुर">कोंढणपुर</option>
+		<option value="कोंढवे खुर्द.">कोंढवे खुर्द.</option>
+		<option value="कोंढवे धावडे">कोंढवे धावडे</option>
+		<option value="कोंढवे बु.">कोंढवे बु.</option>
+		<option value="कोथरुड">कोथरुड</option>
+		<option value="कोपरे">कोपरे</option>
+		<option value="कोरेगावमूळ">कोरेगावमूळ</option>
+		<option value="कोलवडी">कोलवडी</option>
+		<option value="कोळेवाडी">कोळेवाडी</option>
+		<option value="खडकवाडी">खडकवाडी</option>
+		<option value="खडकवासला">खडकवासला</option>
+		<option value="खेडशिवापूर">खेडशिवापूर</option>
+		<option value="खराडी">खराडी</option>
+		<option value="खाडेवाडी">खाडेवाडी</option>
+		<option value="खानापूर">खानापूर</option>
+		<option value="खामगाव टेक">खामगाव टेक</option>
+		<option value="खामगांव मावळ">खामगांव मावळ</option>
+		<option value="गुजर निंबाळकरवाडी">गुजर निंबाळकरवाडी</option>
+		<option value="गाऊडदरा">गाऊडदरा</option>
+		<option value="गावडेवाडी">गावडेवाडी</option>
+		<option value="गोगलवाडी">गोगलवाडी</option>
+		<option value="गो-हे खुर्द">गो-हे खुर्द</option>
+		<option value="गो-हे बुद्रुक">गो-हे बुद्रुक</option>
+		<option value="घेरा सिंहगड">घेरा सिंहगड</option>
+		<option value="चऱ्होली बु">चऱ्होली बु</option>
+		<option value="चिखली">चिखली</option>
+		<option value="चिंचवड">चिंचवड</option>
+		<option value="चिंचोली">चिंचोली</option>
+		<option value="चोविसावाडी">चोविसावाडी</option>
+		<option value="जांभुळवाडी">जांभुळवाडी</option>
+		<option value="जांभळी">जांभळी</option>
+		<option value="टिळेकरवाडी">टिळेकरवाडी</option>
+		<option value="डुडुळगाव">डुडुळगाव</option>
+		<option value="डोंगरगाव">डोंगरगाव</option>
+		<option value="डोणजे">डोणजे</option>
+		<option value="तरडे">तरडे</option>
+		<option value="तळेरानवाडी">तळेरानवाडी</option>
+		<option value="तळवडे">तळवडे</option>
+		<option value="तुळापुर">तुळापुर</option>
+		<option value="तानाजीनगर">तानाजीनगर</option>
+		<option value="थेऊर">थेऊर</option>
+		<option value="थोपटे वाडी">थोपटे वाडी</option>
+		<option value="देहु">देहु</option>
+		<option value="दापोडी">दापोडी</option>
+		<option value="दिघी">दिघी</option>
+		<option value="धनकवडी">धनकवडी</option>
+		<option value="धानोरी">धानोरी</option>
+		<option value="धायरी">धायरी</option>
+		<option value="नऱ्हे">नऱ्हे</option>
+		<option value="न्हावी सांडस">न्हावी सांडस</option>
+		<option value="नांदेड">नांदेड</option>
+		<option value="नांदोशी">नांदोशी</option>
+		<option value="नायगाव">नायगाव</option>
+		<option value="निगडी">निगडी</option>
+		<option value="निरगुडी">निरगुडी</option>
+		<option value="पेठ">पेठ</option>
+		<option value="पेरणे">पेरणे</option>
+		<option value="पाषाण">पाषाण</option>
+		<option value="पिंपरी वाघेरे">पिंपरी वाघेरे</option>
+		<option value="पिंपरी सांडस">पिंपरी सांडस</option>
+		<option value="पिंपळे गुरव">पिंपळे गुरव</option>
+		<option value="पिंपळे निलख">पिंपळे निलख</option>
+		<option value="पिंपळे सौदागर">पिंपळे सौदागर</option>
+		<option value="पिसोळी">पिसोळी</option>
+		<option value="फुरसुंगी">फुरसुंगी</option>
+		<option value="फुलगाव">फुलगाव</option>
+		<option value="बकोरी">बकोरी</option>
+		<option value="बुरके गाव">बुरके गाव</option>
+		<option value="बहुली">बहुली</option>
+		<option value="बाणेर">बाणेर</option>
+		<option value="बालेवाडी">बालेवाडी</option>
+		<option value="बिबवेवाडी">बिबवेवाडी</option>
+		<option value="बिवरी">बिवरी</option>
+		<option value="बोपखेल">बोपखेल</option>
+		<option value="बोऱ्हाडेवाडी">बोऱ्हाडेवाडी</option>
+		<option value="भगतवाडी">भगतवाडी</option>
+		<option value="भवरापुर">भवरापुर</option>
+		<option value="भावडी">भावडी</option>
+		<option value="भिलारेवाडी">भिलारेवाडी</option>
+		<option value="भोसरी">भोसरी</option>
+		<option value="म .कर्वेनगर">म .कर्वेनगर</option>
+		<option value="मणेरवाडी">मणेरवाडी</option>
+		<option value="मुरकुटे नगर">मुरकुटे नगर</option>
+		<option value="महंमदवाडी">महंमदवाडी</option>
+		<option value="मांगडेवाडी">मांगडेवाडी</option>
+		<option value="मांजरी खुर्द">मांजरी खुर्द</option>
+		<option value="मांजरी बु.">मांजरी बु.</option>
+		<option value="मांडवी खुर्द">मांडवी खुर्द</option>
+		<option value="मांडवी बुद्रुक">मांडवी बुद्रुक</option>
+		<option value="मामुर्डी">मामुर्डी</option>
+		<option value="मालखेड">मालखेड</option>
+		<option value="माळीनगर">माळीनगर</option>
+		<option value="मोकरवाडी">मोकरवाडी</option>
+		<option value="मोगरवाडी">मोगरवाडी</option>
+		<option value="मोरदरवाडी">मोरदरवाडी</option>
+		<option value="मोशी">मोशी</option>
+		<option value="येवलेवाडी">येवलेवाडी</option>
+		<option value="रहाटणी">रहाटणी</option>
+		<option value="रहाटवडे">रहाटवडे</option>
+		<option value="रावेत">रावेत</option>
+		<option value="लोणी काळभोर">लोणी काळभोर</option>
+		<option value="लोणीकंद">लोणीकंद</option>
+		<option value="लोहगाव">लोहगाव</option>
+		<option value="वडकी">वडकी</option>
+		<option value="वडगांव खुर्द">वडगांव खुर्द</option>
+		<option value="वडगाव बु।।">वडगाव बु।।</option>
+		<option value="वडगाव शेरी">वडगाव शेरी</option>
+		<option value="वडगाव शिंदे">वडगाव शिंदे</option>
+		<option value="वडदरे">वडदरे</option>
+		<option value="वडमुखवाडी">वडमुखवाडी</option>
+		<option value="वडाची वाडी">वडाची वाडी</option>
+		<option value="वढु खुर्द">वढु खुर्द</option>
+		<option value="वळती">वळती</option>
+		<option value="वाघोली">वाघोली</option>
+		<option value="वांजळेवाडी">वांजळेवाडी</option>
+		<option value="वाडे बोल्हाई">वाडे बोल्हाई</option>
+		<option value="वारजे">वारजे</option>
+		<option value="विठ्ठलनगर">विठ्ठलनगर</option>
+		<option value="श्रीप्रयागधाम">श्रीप्रयागधाम</option>
+		<option value="शेवाळवाडी">शेवाळवाडी</option>
+		<option value="शिंदवणे">शिंदवणे</option>
+		<option value="शिंदेवाडी">शिंदेवाडी</option>
+		<option value="शिवणे">शिवणे</option>
+		<option value="सणस नगर">सणस नगर</option>
+		<option value="सुतारवाडी">सुतारवाडी</option>
+		<option value="सांगरुण">सांगरुण</option>
+		<option value="सांगवी सांडस">सांगवी सांडस</option>
+		<option value="सांगवी हवेली">सांगवी हवेली</option>
+		<option value="सांबरेवाडी">सांबरेवाडी</option>
+		<option value="साष्टे">साष्टे</option>
+		<option value="सिरसवडी">सिरसवडी</option>
+		<option value="सोनापुर">सोनापुर</option>
+		<option value="सोरतापवाडी">सोरतापवाडी</option>
+		<option value="हडपसर">हडपसर</option>
+		<option value="हिंगणे खुर्द">हिंगणे खुर्द</option>
+		<option value="हिंगणगाव">हिंगणगाव</option>
+		<option value="होळकरवाडी">होळकरवाडी</option>
+
+	</select>
+                                                                    <span id="rfvddlVillage" style="color:Red;display:none;">*</span>
+                                                                </div>
+                                                            </div>
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-3">
+                                                                    <span id="lblproptyno1">मिळकत क्रमांक/Property No.</span>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                    <input name="txtAttributeValue1" type="text" value="1" id="txtAttributeValue1" class="form-control">
+                                                                    <div style="color: red; font-size: x-small; font-weight: normal; font-family: 'Verdana', Serif;">
+                                                                        (Enter SurveyNo./CTSNo./MilkatNo./GatNo./PlotNo.)
+                                                                    </div>
+                                                                    <span id="ReqPropno1" style="color:Red;visibility:hidden;">*</span>
+                                                                </div>
+                                                                <div id="updatepnl">
+		
+                                                                        <div class="col-sm-3">
+                                                                            <img id="imgCaptcha_new" src="Handler.ashx?txt=389c4f" style="border-width:0px;">
+                                                                        </div>
+                                                                        <div class="col-sm-3">
+                                                                            <input name="txtImg1" type="text" value="9DDBA8" id="txtImg1" class="form-control" placeholder="Enter captcha as shown">
+                                                                            <span id="RequiredFieldValidator10" style="color:Red;display:none;">*</span>
+                                                                            <span id="lblimg_new" style="color:Red;font-size:12px;"></span>
+                                                                        </div>
+                                                                    
+	</div>
+                                                            </div>
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-3">
+                                                                    <span style="color: ">Do you want to take Name Based Search:(Optional)</span>
+                                                                </div>
+                                                                <div class="col-sm-6">
+                                                                    <div class="col-sm-3">
+                                                                        <input type="submit" name="btnYesRest" value="YES" id="btnYesRest" class="btn btn-warning" style="font-weight:normal;width:80%;">
+                                                                    </div>
+                                                                    <div class="col-sm-3">
+                                                                        
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-sm-3">
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <br>
+                                                            <br>
+                                                            <div class="row form-group">
+                                                                <div class="col-sm-3">
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="submit" name="btnCancel_RestMaha" value=" रद्द / Cancel" id="btnCancel_RestMaha" class="btn btn-danger" style="font-weight:normal;width:80%;">
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    
+                                                                    <span id="Year_msg" style="color:Red;font-size:12px;"></span>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="submit" name="btnCerSai_RestMaha" value="CERSAI Search" onclick="javascript:WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions(&quot;btnCerSai_RestMaha&quot;, &quot;&quot;, true, &quot;aa&quot;, &quot;&quot;, false, false))" id="btnCerSai_RestMaha" class="btn btn-success" style="width:90%;">
+                                                                </div>
+                                                                
+                                                                <div class="col-sm-3">
+                                                                    <div id="UpdateProgress1" style="display:none;" role="status" aria-hidden="true">
+		
+                                                                            <span style="font-size: 11pt; background-attachment: fixed; background-repeat: no-repeat;
+                                                                                font-family: Verdana">
+                                                                                <img src="Images/ajax-loader1.gif" style="width: 67px">Please Wait..... </span>
+                                                                        
+	</div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <br>
+                                                            
+                                                        </div>
+                                                        
+                                                        
+                                                        
+                                                        
+                                                        
+                                                        
+                                                        
+                                                        
+                                                            
+                                                            
+                                                        
+                                                        
+                                                            
+                                                                &nbsp;
+                                                            
+                                                            
+                                                                &nbsp;
+                                                            
+                                                            
+                                                                &nbsp;
+                                                            
+                                                        
+                                                           
+                                                    
+</div>
+                                                    
+                                                    
+                                                
+                                        </div> </div>
+                                                    
+	</div>
+                                                    
+                                                    
+                                                    
+                                                    
+                                                
+                                        
+</div>
+                                
+                            </div>
+                        </div>
+                    </div>
+                    <div id="tblGV">
+                        <!-- GV data start -->
+                        <div class="row form-group">
+                            <div class="col-sm-12">
+                                <div id="upRegistrationGrid">
+                                        <div>
+	<table class="table table-responsive" cellspacing="0" rules="all" border="1" id="RegistrationGrid" style="font-family:Mangal;border-collapse:collapse;">
+		<tbody><tr style="color:White;background-color:SteelBlue;font-family:Verdana;font-size:X-Small;font-weight:normal;">
+			<th scope="col">DocNo</th><th scope="col">DName</th><th scope="col">RDate</th><th scope="col">SROName</th><th scope="col">Seller Name</th><th scope="col">Purchaser Name</th><th scope="col">Property Description</th><th scope="col">SROCode</th><th scope="col">Status</th><th scope="col">IndexII</th>
+		</tr><tr style="background-color:Transparent;">
+			<td>4029</td><td>हक्कसोडपत्र</td><td>11/02/2026</td><td>सह दु.नि.हवेली 1</td><td>{रजनीरमेशक्षीरसागर,धनश्रीजितेंद्रवालझाडे,मंगलराजेंद्रपवार,प्रणालीदिपकवाचकवडे,प्रणवदिपकवाचकवडे,शुभांगीरमेशपिंगळे,अरविंदमहादेववाचकवडे,योगितादिपकवाचकवडे}</td><td>{उत्तमरामचंद्रबिलावरे,माधवरामचंद्रबिलावरे,विलासरामचंद्रबिलावरे}</td><td>, इतर  माहिती: गाव मौजे आकुर्डी,ता. हवेली,जि. पुणे येथील स. नं. 136,हिस्सा नं. 45 यांसी सि.स.नं. 4887,4888,4888/1,4888/2 4888/3,4888/4, 4888/5, 4888/6, 4888/7, 4888/8  यांसी क्षेत्र 00 हे. 05 आर म्हणजेच 500 चौ. मी. पैकी या मिळकतीमधील लिहून देणार यांचा अविभक्त हिस्सा.</td><td style="width:1px;">1</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$0')" class="Button"></td>
+		</tr><tr style="background-color:AliceBlue;">
+			<td>379</td><td>रिकन्व्हेन्स</td><td>05/01/2026</td><td>सह दु.नि. हवेली 2</td><td>{"लिहून घेणार -  मनोजजयरामगुप्ता"}</td><td>{"लिहून देणार - श्री. सिद्धेश्वर नागरी सहकारी पतसंस्था मर्यादित पुणे तर्फे अधिकृत अधिकारी संजयसदाशिवपाटील"}</td><td>, इतर  माहिती: , इतर  माहिती: गाव मौजे आकुर्डी येथील स.न.18 हिस्सा न. 1 अे /1अे/1अे /1अे /1अे /1 यांसी सि.टी.एस. क्रमांक 4203 या मिळकतीवर बांधण्यात आलेल्या इमारतीमधील ऐ विंग मधील तळ मजल्यावरील दुकान /शॉप क्र. 30 यांसी क्षेत्र 17.77 चौ.मी. ही मिळकत.(मे. सब रजिस्ट्रार साो. हवेली नं. 22 यांचे कार्यालयातील दिनांक 04.08.2018 रोजीचा गहाणखत दस्त नं. 11884/2018 प्रस्तुत दस्ताने रिलीज)</td><td style="width:1px;">2</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$1')" class="Button"></td>
+		</tr><tr style="background-color:Transparent;">
+			<td>1656</td><td>असाईनमेंट डीड</td><td>16/01/2026</td><td>सह दु.नि. हवेली 2</td><td>{"सत्वशिला चिंतामणि पोतदार","महेश चिंतामणि पोतदार"}</td><td>{"वैभव हंसराज पाटील","शितल राजकिशोर भदाणे"}</td><td>, इतर  माहिती: गांव मौजे आकुर्डी येथील स.नं.179,हि.नं.3/1अे/1बी,सिसनं.4497 क्षेत्र 6524 चौ.फुट म्हणजेच 607 चौ.मी.वरील वेदांत रेसिडेन्सी मधील चौथ्या मजल्यावरील फ्लॅट नं.9 यासी क्षेत्र 450.47 चौ.फुट म्हणजेच 41.86 चौ.मी.कारपेट/ओपन टेरेस क्षेत्र 113.66 चौ.फुट असे एकुण सेलेबल क्षेत्र 634.13 चौ.फुट म्हणजेच 58.93 चौ.मी.,कार पार्किंग सहित हि मिळकत.</td><td style="width:1px;">2</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$2')" class="Button"></td>
+		</tr><tr style="background-color:AliceBlue;">
+			<td>3875</td><td>गहाणखत</td><td>03/02/2026</td><td>सह दु.नि. हवेली 2</td><td>{"कर्ज घेणार -  मनोजजयरामगुप्ता"}</td><td>{"कर्ज देणार - सिद्धेश्वर नागरी सहकारी पतसंस्था तर्फे अधिकृत अधिकारी संजय सदाशिव पाटील"}</td><td>, इतर  माहिती: , इतर  माहिती: गाव मौजे आकुर्डी येथील स.न.18 हिस्सा न. 1 अे /1अे/1अे /1अे /1अे /1 यांसी सि.टी.एस. क्रमांक 4203 या मिळकतीवर बांधण्यात आलेल्या सोनिग्रा क्लासिक अे सहकारी गृहरचना संस्था मर्यादित या इमारतीमधील ऐ विंग मधील तळ मजल्यावरील दुकान /शॉप क्र. 30 यांसी क्षेत्र 17.77 चौ.मी. ही मिळकत.</td><td style="width:1px;">2</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$3')" class="Button"></td>
+		</tr><tr style="background-color:Transparent;">
+			<td>1515</td><td>गहाणखत</td><td>18/02/2026</td><td>सह दु.नि. हवेली 4</td><td>{"ज्योती सागर विशे"}</td><td>{"बँक ऑफ महाराष्ट्र शाखा हाऊसिंग फायनॅन्स शिवाजीनगर पुणे"}</td><td>, इतर  माहिती: गाव मौजे आकुर्डी ता. हवेली जि. पुणे येथील सर्वे नं. 173 हिस्सा नं. 1बी यासी सिटीएस नं. 4661 पार्ट या मिळकतीवर बांधण्यात आलेले प्रोजेक्ट माय होम आकुर्डी मधील बिल्डिंग नं. टॉवर ए मधील आठव्या मजल्यावरील फ्लॅट नं. 804 यासी क्षेत्र 91.260 चौ. मी. कारपेट व ओपन बाल्कनी यासी क्षेत्र 9.640 चौ. मी. व यूटिलिटी एरिया यासी क्षेत्र 3.720 चौ. मी. व कव्हर्ड स्टँक पार्किंग यासी नं. ए35एस यासी क्षेत्र 10.300 चौ. मी. ही मिळकत.</td><td style="width:1px;">4</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$4')" class="Button"></td>
+		</tr><tr style="background-color:AliceBlue;">
+			<td>3340</td><td>गहाणखत</td><td>23/03/2026</td><td>सह दु.नि. हवेली 4</td><td>{"अफिया अय्याज शेख"}</td><td>{"बँक ऑफ महाराष्ट्र शाखा हाऊसिंग फायनॅन्स सुस पुणे"}</td><td>, इतर  माहिती:  गाव मौजे आकुर्डी ता. हवेली जि. पुणे येथील सर्वे नं. 173 हिस्सा नं. 1बी यासी सिटीएस नं. 4661 पार्ट या मिळकतीवर बांधण्यात आलेले प्रोजेक्ट माय होम आकुर्डी मधील बिल्डिंग नं. टॉवर बी मधील दहाव्या मजल्यावरील फ्लॅट नं. 1006 यासी क्षेत्र 91.260 चौ. मी. कारपेट व ओपन बाल्कनी यासी क्षेत्र 9.640 चौ. मी. व यूटिलिटी एरिया यासी क्षेत्र 3.720 चौ. मी. व मेकॅनिकल पार्किंग यासी नं. एम31 ही मिळकत.</td><td style="width:1px;">4</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$5')" class="Button"></td>
+		</tr><tr style="background-color:Transparent;">
+			<td>3341</td><td>गहाणखत</td><td>23/03/2026</td><td>सह दु.नि. हवेली 4</td><td>{"फरझाना अय्याज शेख"}</td><td>{"बँक ऑफ महाराष्ट्र शाखा हाऊसिंग फायनॅन्स सुस पुणे"}</td><td>, इतर  माहिती:  गाव मौजे आकुर्डी ता. हवेली जि. पुणे येथील सर्वे नं. 173 हिस्सा नं. 1बी यासी सिटीएस नं. 4661 पार्ट या मिळकतीवर बांधण्यात आलेले प्रोजेक्ट माय होम आकुर्डी मधील बिल्डिंग नं. टॉवर ए मधील आठव्या मजल्यावरील फ्लॅट नं. 805 यासी क्षेत्र 67.120 चौ. मी. कारपेट व ओपन बाल्कनी यासी क्षेत्र 8.500 चौ. मी. व यूटिलिटी एरिया यासी क्षेत्र 2.380 चौ. मी. व मेकॅनिकल पार्किंग यासी नं. एम32 ही मिळकत.</td><td style="width:1px;">4</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$6')" class="Button"></td>
+		</tr><tr style="background-color:AliceBlue;">
+			<td>27</td><td>रिकन्व्हेन्स</td><td>02/01/2026</td><td>सह दु.नि. हवेली 5</td><td>{"लिहून घेणार- सुरेशपरशुरामयेळवंडे","लिहून घेणार - मयुरसुरेशयेळवंडे"}</td><td>{"लिहून देणार - डॉ. मणिभाई देसाई ग्रामीण बिगर शेती सहकारी पतसंस्था मर्यादित उरुळीकांचन ता.हवेली जिल्हा पुणे शाखा निगडी प्राधिकरण पुणे तर्फे सिनियर कलर्क  श्री. खुशालयादवरावगोसावी"}</td><td>, इतर  माहिती:  पिंपरी चिंचवड महानगरपालिका हद्दीतील 1अ)गांव मौजे आकुर्डी येथील मोहननगर विभाग येथील स.नं.127 हिस्सा नं.1अ/1ब/1 यांसी क्षेत्र 584 चौ.फुट जागा व त्यावरील आर.सी.सी. मधील बांधलेले घर मिळकत यांसी क्षेत्र 1332.8 चौ.फुट असून यांसी पिंपरी चिंचवड महानगरपालिका मिळकत क्र.02/06/1803. 1ब)गांव मौजे आकुर्डी मोहननगर विभाग येथील सर्व्हे नं. 127 हिस्सा नं. 1अ/1ब/1 यापैकी क्षेञ 584 चौ.फुट व त्यावर असलेले आर.सी.सी तीन मजली बांधकाम यांसी क्षेञफळ 1545 चौ.फुट संडास बाथरुम व सामाईक जिन्यासह मिळकत व इतर असलेले सर्व प्रकारचे बांधकाम यांसी पिंपरी चिंचवड महानगरपालिका यांनी दिलेला मिळकत क्रमांक 01803 व सदर मिळकतीवर होणारे सर्व प्रकारचे बांधकामासहीत मिळकत अशा ह्या मिळकती प्रस्तुत रिकन्व्हेन्स दस्ताचा विषय आहे.</td><td style="width:1px;">5</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$7')" class="Button"></td>
+		</tr><tr style="background-color:Transparent;">
+			<td>169</td><td>असाईनमेंट डीड</td><td>07/01/2026</td><td>सह दु.नि. हवेली 5</td><td>{"श्री. प्रभू राजगोपाल ईश्वर"}</td><td>{"श्री. मोहित लीलाधर टोके"}</td><td>, इतर  माहिती: गाव मौजे आकुर्डी येथील एमआयडीसी हद्दीतील प्लॉट नं. आरएच-170 या मिळकतीवर बांधलेल्या "स्मृती सहकारी गृह रचना संस्था मर्यादीत" मधील पहिल्या मजल्यावरील फ्लॅट नं. 10 यांसी क्षेत्र 600.00 चौ.फूट म्हणजेच 55.76 चौ.मीटर बिल्टअप  यांसी पिंपरी-चिंचवड महानगरपालिका मिळकत क्रं. 02/07/01565 व एमएसइडीसीएल ग्राहक क्रं. 170147042101</td><td style="width:1px;">5</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$8')" class="Button"></td>
+		</tr><tr style="background-color:AliceBlue;">
+			<td>230</td><td>पुरवणी करारनामा</td><td>08/01/2026</td><td>सह दु.नि. हवेली 5</td><td>{"मे. आशिर्वाद सक्सेस प्रॉपर्टीजतर्फे भागीदारमोहनलाल बेनीप्रसाद गोयल"}</td><td>{सुभाषझुंबरलालबेदमुथा}</td><td>, इतर  माहिती: गाव मौजे आकुर्डी प्राधिकरण येथील सेक्टर नं. 24 मधील प्लॉट नं. 129 यासी एकूण क्षेत्र 541.7 चौरस मीटर जमीन व त्यावरील बांधकाम हि मिळकत या संदर्भात हवेली क्रमांक 05 येथिल दिनांक 30/03/2022 रोजीचा विकसन करारनामा यासी दस्त नोंदणी क्रमांक 6126/2022 असा असून सदर मिळकतीचे विकसनकामी लिहून देणार यांनी लिहून घेणार यांना देय असलेली एकूण मोबदला रक्कम रूपये 9,90,00,000/-(रक्कम रूपये नऊ कोटी नव्वद लाख फक्त)लिहून घेणार यांना पूर्णपणे प्राप्त झाली असल्याने व ते मान्य करून सदर लिहून घेणार यांनी लिहून देणार यांना सदर मिळकतीचे विकसनाचे संपूर्ण अमर्याद हक्क व अधिकार लिहून देत आहेत,आणि सदर मिळकतीचा ताबा प्रस्तुत दस्तान्वये लिहून देणार यांचे लाभामध्ये आज रोजी विनाअट कोणतेही हक्क राखून न ठेवता तबदिल केला आहे. सदर बाबींच्या पुष्टीकरिता प्रस्तुत पुरवणी दस्त लिहून ठेवण्यात येत आहे. तसेच सदरील पुरवणी करारनामा दस्तास कोणतेही वाढीव क्षेत्र व वाढीव मोबदला घेतलेला व दिलेला नाही. तसेच इतर माहित्ती दस्तात सविस्तर नमूद केलेप्रमाणे.</td><td style="width:1px;">5</td><td style="width:1px;">4</td><td><input type="button" value="IndexII" onclick="javascript:__doPostBack('RegistrationGrid','indexII$9')" class="Button"></td>
+		</tr><tr align="left" style="color:Black;background-color:#CCCCCC;">
+			<td colspan="10"><table border="0">
+				<tbody><tr>
+					<td><span>1</span></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$2')" style="color:Black;">2</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$3')" style="color:Black;">3</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$4')" style="color:Black;">4</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$5')" style="color:Black;">5</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$6')" style="color:Black;">6</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$7')" style="color:Black;">7</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$8')" style="color:Black;">8</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$9')" style="color:Black;">9</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$10')" style="color:Black;">10</a></td><td><a href="javascript:__doPostBack('RegistrationGrid','Page$11')" style="color:Black;">...</a></td>
+				</tr>
+			</tbody></table></td>
+		</tr>
+	</tbody></table>
+</div>
+                                    </div>
+                                <div id="upReportSearch">
+                                        
+                                    </div>
+                            </div>
+                        </div>
+                        <!-- GV data end -->
+                    </div>
+                
+
+                <p style="color:red;"><b>* Information provided on this site is updated and no physical visit is required to obtain this information</b></p>
+
+                
+                    
+                        <table style="font-weight: normal; font-size: 13px; font-family: 'Times New Roman', Serif;
+                            text-align: left;">
+                            <tbody><tr>
+                                <td style="background-image: none; text-align: left;">
+                                    
+                                    <span style="font-size: 9pt; font-family: Verdana; text-align: center; border-top: solid">
+                                        <strong style="text-align: center">DISCLAIMER </strong>:Information owned, maintained
+                                        and updated by : Dept. Of Registration &amp; Stamps,Maharashtra.All queries/Comments
+                                        regarding the contents may be sent at IGR, Pune(M.S.) (79.6)<br>
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="background-image: none; text-align: center; font-family: Verdana;">
+                                    &nbsp;Send us feedback on&nbsp;
+                                    <span id="Label2" style="font-size:X-Small;font-weight:bold;font-style: italic">feedback[at]igrmaharashtra[dot]gov[dot]in</span>.
+                                </td>
+                            </tr>
+                        </tbody></table>
+                    
+                
+                
+                    
+                        
+                        
+                    
+                
+                
+                    
+                        
+                        
+                        
+                        
+                        
+                    
+                
+                
+                    
+                        
+                        
+                    
+                
+                
+                    
+                        
+                        
+                    
+                
+                
+                    
+                        <input type="hidden" name="FS_PropertyNumber" id="FS_PropertyNumber">
+                        <input type="hidden" name="FS_IGR_FLAG" id="FS_IGR_FLAG">
+                    
+                
+                
+                    
+                        
+                        
+                        
+                        
+                        
+                        
+                    
+                
+                
+                    
+                    
+                
+                
+                
+            
+        
+    
+<span style="display: none !important;"><input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value=""></span><span style="display: none !important;"><input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value=""></span><span style="display: none !important;"><input type="hidden" name="__LASTFOCUS" id="__LASTFOCUS" value=""></span><span style="display: none !important;"><input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="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vuCkoeClgB/gpK7gpYHgpLDgpJXgpYHgpJ/gpYcg4KSo4KSX4KSwG+CkruCkueCkguCkruCkpuCkteCkvuCkoeClgB7gpK7gpL7gpILgpJfgpKHgpYfgpLXgpL7gpKHgpYAi4KSu4KS+4KSC4KSc4KSw4KWAIOCkluClgeCksOCljeCkphrgpK7gpL7gpILgpJzgpLDgpYAg4KSs4KWBLiLgpK7gpL7gpILgpKHgpLXgpYAg4KSW4KWB4KSw4KWN4KSmKOCkruCkvuCkguCkoeCkteClgCDgpKzgpYHgpKbgpY3gpLDgpYHgpJUY4KSu4KS+4KSu4KWB4KSw4KWN4KSh4KWAEuCkruCkvuCksuCkluClh+CkoRXgpK7gpL7gpLPgpYDgpKjgpJfgpLAY4KSu4KWL4KSV4KSw4KS14KS+4KSh4KWAGOCkruCli+Ckl+CksOCkteCkvuCkoeClgBvgpK7gpYvgpLDgpKbgpLDgpLXgpL7gpKHgpYAM4KSu4KWL4KS24KWAG+Ckr+Clh+CkteCksuClh+CkteCkvuCkoeClgBLgpLDgpLngpL7gpJ/gpKPgpYAV4KSw4KS54KS+4KSf4KS14KSh4KWHD+CksOCkvuCkteClh+CkpB/gpLLgpYvgpKPgpYAg4KSV4KS+4KSz4KSt4KWL4KSwFeCksuCli+Cko+ClgOCkleCkguCkphLgpLLgpYvgpLngpJfgpL7gpLUM4KS14KSh4KSV4KWAIuCkteCkoeCkl+CkvuCkguCktSDgpJbgpYHgpLDgpY3gpKYc4KS14KSh4KSX4KS+4KS1IOCkrOClgeClpOClpBzgpLXgpKHgpJfgpL7gpLUg4KS24KWH4KSw4KWAH+CkteCkoeCkl+CkvuCktSDgpLbgpL/gpILgpKbgpYcP4KS14KSh4KSm4KSw4KWHG+CkteCkoeCkruClgeCkluCkteCkvuCkoeClgBzgpLXgpKHgpL7gpJrgpYAg4KS14KS+4KSh4KWAGeCkteCkouClgSDgpJbgpYHgpLDgpY3gpKYM4KS14KSz4KSk4KWAEuCkteCkvuCkmOCli+CksuClgB7gpLXgpL7gpILgpJzgpLPgpYfgpLXgpL7gpKHgpYAi4KS14KS+4KSh4KWHIOCkrOCli+CksuCljeCkueCkvuCkiA/gpLXgpL7gpLDgpJzg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4KS+4KSX4KSwEuCkquCkv+CkuOCli+Cks+ClgBjgpKvgpYHgpLDgpLjgpYHgpILgpJfgpYAS4KSr4KWB4KSy4KSX4KS+4KS1D+CkrOCkleCli+CksOClgBngpKzgpYHgpLDgpJXgpYcg4KSX4KS+4KS1D+CkrOCkueClgeCksuClgA/gpKzgpL7gpKPgpYfgpLAY4KSs4KS+4KSy4KWH4KS14KS+4KSh4KWAG+CkrOCkv+CkrOCkteClh+CkteCkvuCkoeClgA/gpKzgpL/gpLXgpLDgpYAS4KSs4KWL4KSq4KSW4KWH4KSyJOCkrOCli+CkseCljeCkueCkvuCkoeClh+CkteCkvuCkoeClgBXgpK3gpJfgpKTgpLXgpL7gpKHgpYAV4KSt4KS14KSw4KS+4KSq4KWB4KSwD+CkreCkvuCkteCkoeClgB7gpK3gpL/gpLLgpL7gpLDgpYfgpLXgpL7gpKHgpYAP4KSt4KWL4KS44KSw4KWAHeCkriAu4KSV4KSw4KWN4KS14KWH4KSo4KSX4KSwGOCkruCko+Clh+CksOCkteCkvuCkoeClgB/gpK7gpYHgpLDgpJXgpYHgpJ/gpYcg4KSo4KSX4KSwG+CkruCkueCkguCkruCkpuCkteCkvuCkoeClgB7gpK7gpL7gpILgpJfgpKHgpYfgpLXgpL7gpKHgpYAi4KSu4KS+4KSC4KSc4KSw4KWAIOCkluClgeCksOCljeCkphrgpK7gpL7gpILgpJzgpLDgpYAg4KSs4KWBLiLgpK7gpL7gpILgpKHgpLXgpYAg4KSW4KWB4KSw4KWN4KSmKOCkruCkvuCkguCkoeCkteClgCDgpKzgpYHgpKbgpY3gpLDgpYHgpJUY4KSu4KS+4KSu4KWB4KSw4KWN4KSh4KWAEuCkruCkvuCksuCkluClh+CkoRXgpK7gpL7gpLPgpYDgpKjgpJfgpLAY4KSu4KWL4KSV4KSw4KS14KS+4KSh4KWAGOCkruCli+Ckl+CksOCkteCkvuCkoeClgBvgpK7gpYvgpLDgpKbgpLDgpLXgpL7gpKHgpYAM4KSu4KWL4KS24KWAG+Ckr+Clh+CkteCksuClh+CkteCkvuCkoeClgBLgpLDgpLngpL7gpJ/gpKPgpYAV4KSw4KS54KS+4KSf4KS14KSh4KWHD+CksOCkvuCkteCl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viDgpLngpKbgpY3gpKbgpYDgpKTgpYDgpLIgMeCkhSngpJfgpL7gpILgpLUg4KSu4KWM4KSc4KWHIOCkhuCkleClgeCksOCljeCkoeClgCDgpK/gpYfgpKXgpYDgpLIg4KSu4KWL4KS54KSo4KSo4KSX4KSwIOCkteCkv+CkreCkvuCklyDgpK/gpYfgpKXgpYDgpLIg4KS4LuCkqOCkgi4xMjcg4KS54KS/4KS44KWN4KS44KS+IOCkqOCkgi4x4KSFLzHgpKwvMSDgpK/gpL7gpILgpLjgpYAg4KSV4KWN4KS34KWH4KSk4KWN4KSwIDU4NCDgpJrgpYwu4KSr4KWB4KSfIOCknOCkvuCkl+CkviDgpLUg4KSk4KWN4KSv4KS+4KS14KSw4KWA4KSyIOCkhuCksC7gpLjgpYAu4KS44KWALiDgpK7gpKfgpYDgpLIg4KSs4KS+4KSC4KSn4KSy4KWH4KSy4KWHIOCkmOCksCDgpK7gpL/gpLPgpJXgpKQg4KSv4KS+4KSC4KS44KWAIOCkleCljeCkt+Clh+CkpOCljeCksCAxMzMyLjgg4KSa4KWMLuCkq+ClgeCknyDgpIXgpLjgpYLgpKgg4KSv4KS+4KSC4KS44KWAIOCkquCkv+CkguCkquCksOClgCDgpJrgpL/gpILgpJrgpLXgpKEg4KSu4KS54KS+4KSo4KSX4KSw4KSq4KS+4KSy4KS/4KSV4KS+IOCkruCkv+Cks+CkleCkpCDgpJXgpY3gpLAuMDIvMDYvMTgwMy4gMeCkrCngpJfgpL7gpILgpLUg4KSu4KWM4KSc4KWHIOCkhuCkleClgeCksOCljeCkoeClgCDgpK7gpYvgpLngpKjgpKjgpJfgpLAg4KS14KS/4KSt4KS+4KSXIOCkr+Clh+CkpeClgOCksiDgpLjgpLDgpY3gpLXgpY3gpLngpYcg4KSo4KSCLiAxMjcg4KS54KS/4KS44KWN4KS44KS+IOCkqOCkgi4gMeCkhS8x4KSsLzEg4KSv4KS+4KSq4KWI4KSV4KWAIOCkleCljeCkt+Clh+CkniA1ODQg4KSa4KWMLuCkq+ClgeCknyDgpLUg4KSk4KWN4KSv4KS+4KS14KSwIOCkheCkuOCksuClh+CksuClhyDgpIbgpLAu4KS44KWALuCkuOClgCDgpKTgpYDgpKgg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pYDgpJ/gpLAg4KSc4KSu4KWA4KSoIOCktSDgpKTgpY3gpK/gpL7gpLXgpLDgpYDgpLIg4KSs4KS+4KSC4KSn4KSV4KS+4KSuIOCkueCkvyDgpK7gpL/gpLPgpJXgpKQg4KSv4KS+IOCkuOCkguCkpuCksOCljeCkreCkvuCkpCDgpLngpLXgpYfgpLLgpYAg4KSV4KWN4KSw4KSu4KS+4KSC4KSVIDA1IOCkr+Clh+CkpeCkv+CksiDgpKbgpL/gpKjgpL7gpILgpJUgMzAvMDMvMjAyMiDgpLDgpYvgpJzgpYDgpJrgpL4g4KS14KS/4KSV4KS44KSoIOCkleCksOCkvuCksOCkqOCkvuCkruCkviDgpK/gpL7gpLjgpYAg4KSm4KS44KWN4KSkIOCkqOCli+CkguCkpuCko+ClgCDgpJXgpY3gpLDgpK7gpL7gpILgpJUgNjEyNi8yMDIyIOCkheCkuOCkviDgpIXgpLjgpYLgpKgg4KS44KSm4KSwIOCkruCkv+Cks+CkleCkpOClgOCkmuClhyDgpLXgpL/gpJXgpLjgpKjgpJXgpL7gpK7gpYAg4KSy4KS/4KS54KWC4KSoIOCkpuClh+Cko+CkvuCksCDgpK/gpL7gpILgpKjgpYAg4KSy4KS/4KS54KWC4KSoIOCkmOClh+Cko+CkvuCksCDgpK/gpL7gpILgpKjgpL4g4KSm4KWH4KSvIOCkheCkuOCksuClh+CksuClgCDgpI/gpJXgpYLgpKMg4KSu4KWL4KSs4KSm4KSy4KS+IOCksOCkleCljeCkleCkriDgpLDgpYLgpKrgpK/gpYcgOSw5MCwwMCwwMDAvLSjgpLDgpJXgpY3gpJXgpK4g4KSw4KWC4KSq4KSv4KWHIOCkqOCkiiDgpJXgpYvgpJ/gpYAg4KSo4KS14KWN4KS14KSmIOCksuCkvuCkliDgpKvgpJXgpY3gpKQp4KSy4KS/4KS54KWC4KSoIOCkmOClh+Cko+CkvuCksCDgpK/gpL7gpILgpKjgpL4g4KSq4KWC4KSw4KWN4KSj4KSq4KSj4KWHIOCkquCljeCksOCkvuCkquCljeCkpCDgpJ3gpL7gpLLgpYAg4KSF4KS44KSy4KWN4KSv4KS+4KSo4KWHIOCktSDgpKTgpYcg4KSu4KS+4KSo4KWN4KSvIOCkleCksOClguCkqCDgpLjgpKbgpLAg4KSy4KS/4KS54KWC4KSoIOCkmOClh+Cko+CkvuCksCDgpK/gpL7gpILgpKjgpYAg4KSy4KS/4KS54KWC4KSoIOCkpuClh+Cko+CkvuCksCDgpK/gpL7gpILgpKjgpL4g4KS44KSm4KSwIOCkruCkv+Cks+CkleCkpOClgOCkmuClhyDgpLXgpL/gpJXgpLjgpKjgpL7gpJrgpYcg4KS44KSC4KSq4KWC4KSw4KWN4KSjIOCkheCkruCksOCljeCkr+CkvuCkpiDgpLngpJXgpY3gpJUg4KS1IOCkheCkp+Ckv+CkleCkvuCksCDgpLLgpL/gpLngpYLgpKgg4KSm4KWH4KSkIOCkhuCkueClh+CkpCzgpIbgpKPgpL8g4KS44KSm4KSwIOCkruCkv+Cks+CkleCkpOClgOCkmuCkviDgpKTgpL7gpKzgpL4g4KSq4KWN4KSw4KS44KWN4KSk4KWB4KSkIOCkpuCkuOCljeCkpOCkvuCkqOCljeCkteCkr+ClhyDgpLLgpL/gpLngpYLgpKgg4KSm4KWH4KSj4KS+4KSwIOCkr+CkvuCkguCkmuClhyDgpLLgpL7gpK3gpL7gpK7gpKfgpY3gpK/gpYcg4KSG4KScIOCksOCli+CknOClgCDgpLXgpL/gpKjgpL7gpIXgpJ8g4KSV4KWL4KSj4KSk4KWH4KS54KWAIOCkueCkleCljeCklSDgpLDgpL7gpJbgpYLgpKgg4KSoIOCkoOClh+CkteCkpOCkviDgpKTgpKzgpKbgpL/gpLIg4KSV4KWH4KSy4KS+IOCkhuCkueClhy4g4KS44KSm4KSwIOCkrOCkvuCkrOClgOCkguCkmuCljeCkr+CkviDgpKrgpYHgpLfgpY3gpJ/gpYDgpJXgpLDgpL/gpKTgpL4g4KSq4KWN4KSw4KS44KWN4KSk4KWB4KSkIOCkquClgeCksOCkteCko+ClgCDgpKbgpLjgpY3gpKQg4KSy4KS/4KS54KWC4KSoIOCkoOClh+CkteCko+CljeCkr+CkvuCkpCDgpK/gpYfgpKQg4KSG4KS54KWHLiDgpKTgpLjgpYfgpJog4KS44KSm4KSw4KWA4KSyIOCkquClgeCksOCkteCko+ClgCDgpJXgpLDgpL7gpLDgpKjgpL7gpK7gpL4g4KSm4KS44KWN4KSk4KS+4KS4IOCkleCli+Cko+CkpOClh+CkueClgCDgpLXgpL7gpKLgpYDgpLUg4KSV4KWN4KS34KWH4KSk4KWN4KSwIOCktSDgpLXgpL7gpKLgpYDgpLUg4KSu4KWL4KSs4KSm4KSy4KS+IOCkmOClh+CkpOCksuClh+CksuCkviDgpLUg4KSm4KS/4KSy4KWH4KSy4KS+IOCkqOCkvuCkueClgC4g4KSk4KS44KWH4KSaIOCkh+CkpOCksCDgpK7gpL7gpLngpL/gpKTgpY3gpKTgpYAg4KSm4KS44KWN4KSk4KS+4KSkIOCkuOCkteCkv+CkuOCljeCkpOCksCDgpKjgpK7gpYLgpKYg4KSV4KWH4KSy4KWH4KSq4KWN4KSw4KSu4KS+4KSj4KWHLmRkAgcPDxYCHwAFATVkZAIIDw8WAh8ABQE0ZGQCCg9kFgICAQ8PFgIfCQUBOWRkAgsPDxYCHwNoZGQCGw8PFgIfAAUBMWRkAhwPDxYCHwAFB01hcmF0aGlkZAIdDw8WAh8ABQQyMDI2ZGQCHg8PFgIfAAUEMjAyNmRkAiYPDxYCHwAFBUZhbHNlZGQCKA8PFgIfAAUQSkRSREJQdW5lU2FyaXRhM2RkAiwPDxYCHwAFFC0tLS0tU2VsZWN0IEFyZWEtLS0tZGQCLw8PFgIfAAUBMGRkAjEPDxYCHwAFEEpEUkRCUHVuZVNhcml0YTFkZAI7Dw8WAh8ABQExZGQCPQ8PFgIfAAUCNyBkZAI/Dw8WAh8ABRIyNzI1MDAwNzAzMTIwMzAwMDBkZAJBDw8WAh8ABRXgpIbgpJXgpYHgpLDgpY3gpKHgpYBkZAJDDw8WAh8ABQZBa3VyZGlkZAJFDw8WAh8ABQIyNWRkGAMFEFJlZ2lzdHJhdGlvbkdyaWQPPCsADAEIAkRkBQpNdWx0aVZpZXczDw9kZmQFDW1udVNlYXJjaFR5cGUPD2QFATFkHotBsn6M4snMZ8IIMKTYdf8uJzZZfAUgLJpMuxXVCdQ="></span><span style="display: none !important;"><input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="BE9F1233"></span><span style="display: none !important;"><input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="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"></span></form></center>
+
+<script type="text/javascript">
+//<![CDATA[
+var Page_Validators =  new Array(document.getElementById("rfvddlDistrict"), document.getElementById("RegularExpressionValidator1"), document.getElementById("rfvtxtAreaName"), document.getElementById("rfvddlareaname"), document.getElementById("ReqPropno"), document.getElementById("RequiredFieldValidator3"));
+//]]>
+</script>
+
+<script type="text/javascript">
+//<![CDATA[
+var rfvddlDistrict = document.all ? document.all["rfvddlDistrict"] : document.getElementById("rfvddlDistrict");
+rfvddlDistrict.controltovalidate = "ddlDistrict";
+rfvddlDistrict.focusOnError = "t";
+rfvddlDistrict.errormessage = "---Select District----";
+rfvddlDistrict.display = "Dynamic";
+rfvddlDistrict.validationGroup = "aa";
+rfvddlDistrict.evaluationfunction = "RequiredFieldValidatorEvaluateIsValid";
+rfvddlDistrict.initialvalue = "---Select District----";
+var RegularExpressionValidator1 = document.all ? document.all["RegularExpressionValidator1"] : document.getElementById("RegularExpressionValidator1");
+RegularExpressionValidator1.controltovalidate = "txtAreaName";
+RegularExpressionValidator1.errormessage = "Please Enter Village Name Correctly";
+RegularExpressionValidator1.evaluationfunction = "RegularExpressionValidatorEvaluateIsValid";
+RegularExpressionValidator1.validationexpression = "[a-zA-Z]{1,}";
+var rfvtxtAreaName = document.all ? document.all["rfvtxtAreaName"] : document.getElementById("rfvtxtAreaName");
+rfvtxtAreaName.controltovalidate = "txtAreaName";
+rfvtxtAreaName.focusOnError = "t";
+rfvtxtAreaName.errormessage = "Enter Area Name";
+rfvtxtAreaName.validationGroup = "aa";
+rfvtxtAreaName.evaluationfunction = "RequiredFieldValidatorEvaluateIsValid";
+rfvtxtAreaName.initialvalue = "";
+var rfvddlareaname = document.all ? document.all["rfvddlareaname"] : document.getElementById("rfvddlareaname");
+rfvddlareaname.controltovalidate = "ddlareaname";
+rfvddlareaname.focusOnError = "t";
+rfvddlareaname.errormessage = "---Select areaname----";
+rfvddlareaname.display = "Dynamic";
+rfvddlareaname.validationGroup = "aa";
+rfvddlareaname.evaluationfunction = "RequiredFieldValidatorEvaluateIsValid";
+rfvddlareaname.initialvalue = "-----Select Area----";
+var ReqPropno = document.all ? document.all["ReqPropno"] : document.getElementById("ReqPropno");
+ReqPropno.controltovalidate = "txtAttributeValue";
+ReqPropno.focusOnError = "t";
+ReqPropno.errormessage = "Enter Property No.";
+ReqPropno.validationGroup = "aa";
+ReqPropno.evaluationfunction = "RequiredFieldValidatorEvaluateIsValid";
+ReqPropno.initialvalue = "";
+var RequiredFieldValidator3 = document.all ? document.all["RequiredFieldValidator3"] : document.getElementById("RequiredFieldValidator3");
+RequiredFieldValidator3.controltovalidate = "txtImg";
+RequiredFieldValidator3.display = "Dynamic";
+RequiredFieldValidator3.validationGroup = "aa";
+RequiredFieldValidator3.evaluationfunction = "RequiredFieldValidatorEvaluateIsValid";
+RequiredFieldValidator3.initialvalue = "";
+//]]>
+</script>
+
+
+<script type="text/javascript">
+//<![CDATA[
+var mnuSearchType_Data = new Object();
+mnuSearchType_Data.disappearAfter = 500;
+mnuSearchType_Data.horizontalOffset = 0;
+mnuSearchType_Data.verticalOffset = 0;
+mnuSearchType_Data.staticHoverClass = 'mnuSearchType_9';
+mnuSearchType_Data.staticHoverHyperLinkClass = 'mnuSearchType_8';
+mnuSearchType_Data.iframeUrl = '/WebResource.axd?d=Qc_f2wLLfnFfzNE-2FNetSyWdVV1PUNqGQAVlvn_jvrfgg9BSAcyBNT8yg_gYx2srXv4m0xz6OOiSBlWoaYvQed7iK7LJ2O13Hax1fFrsew1&t=638568802371266408';
+
+var Page_ValidationActive = false;
+if (typeof(ValidatorOnLoad) == "function") {
+    ValidatorOnLoad();
+}
+
+function ValidatorOnSubmit() {
+    if (Page_ValidationActive) {
+        return ValidatorCommonOnSubmit();
+    }
+    else {
+        return true;
+    }
+}
+        
+document.getElementById('rfvddlDistrict').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlDistrict'));
+}
+
+document.getElementById('RegularExpressionValidator1').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RegularExpressionValidator1'));
+}
+
+document.getElementById('rfvtxtAreaName').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvtxtAreaName'));
+}
+
+document.getElementById('rfvddlareaname').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('rfvddlareaname'));
+}
+
+document.getElementById('ReqPropno').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('ReqPropno'));
+}
+
+document.getElementById('RequiredFieldValidator3').dispose = function() {
+    Array.remove(Page_Validators, document.getElementById('RequiredFieldValidator3'));
+}
+Sys.Application.add_init(function() {
+    $create(Sys.UI._UpdateProgress, {"associatedUpdatePanelId":null,"displayAfter":100,"dynamicLayout":true}, null, null, $get("UpdateProgress4"));
+});
+//]]>
+</script>
+  
+
+</body></html>
