@@ -556,6 +556,32 @@ def process_property(property_no: int):
         "__EVENTVALIDATION": state["eventvalidation"],
     }
 
+    def _post_page_and_update_hidden(target_page: int) -> bool:
+        payload_page_local = _build_common_payload(state, property_no, hidden_state)
+        payload_page_local["__EVENTTARGET"] = "RegistrationGrid"
+        payload_page_local["__EVENTARGUMENT"] = f"Page${target_page}"
+
+        response_page_local = _request_with_retry(
+            lambda: session.post(URL, data=payload_page_local, headers=headers),
+            label=f"page_post property={property_no} page={target_page}",
+        )
+        print("STATUS(page):", response_page_local.status_code)
+        print((response_page_local.text or "")[:500])
+
+        if _is_terminal_page_response(response_page_local.text):
+            print(f"[PAGE END] property={property_no}, page={target_page} terminal response")
+            return False
+
+        page_updates_local = _extract_hidden_fields_from_msajax_delta(response_page_local.text)
+        if not page_updates_local:
+            print(f"[PAGE END] property={property_no}, page={target_page} no hidden updates")
+            return False
+
+        hidden_state["__VIEWSTATE"] = page_updates_local.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
+        hidden_state["__VIEWSTATEGENERATOR"] = page_updates_local.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
+        hidden_state["__EVENTVALIDATION"] = page_updates_local.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
+        return True
+
     page_no = 1
     while True:
         print(f"[PAGE] property={property_no}, page={page_no}")
@@ -609,29 +635,23 @@ def process_property(property_no: int):
                 "__EVENTVALIDATION": refresh_state["eventvalidation"],
             }
 
-        payload_page = _build_common_payload(state, property_no, hidden_state)
-        payload_page["__EVENTTARGET"] = "RegistrationGrid"
-        payload_page["__EVENTARGUMENT"] = f"Page${next_page}"
+            # Rebuild page state in steps: 11, 21, 31 ... up to target page.
+            milestones = list(range(11, next_page + 1, 10))
+            refresh_ok = True
+            for milestone_page in milestones:
+                print(f"[REFRESH PAGE STEP] property={property_no}, page={milestone_page}")
+                if not _post_page_and_update_hidden(milestone_page):
+                    refresh_ok = False
+                    break
+            if not refresh_ok:
+                break
 
-        response_page = _request_with_retry(
-            lambda: session.post(URL, data=payload_page, headers=headers),
-            label=f"page_post property={property_no} page={next_page}",
-        )
-        print("STATUS(page):", response_page.status_code)
-        print((response_page.text or "")[:500])
+            # We are now positioned at next_page; continue with index loop on this page.
+            page_no = next_page
+            continue
 
-        if _is_terminal_page_response(response_page.text):
-            print(f"[PAGE END] property={property_no}, next_page={next_page} terminal response")
+        if not _post_page_and_update_hidden(next_page):
             break
-
-        page_updates = _extract_hidden_fields_from_msajax_delta(response_page.text)
-        if not page_updates:
-            print(f"[PAGE END] property={property_no}, next_page={next_page} no hidden updates")
-            break
-
-        hidden_state["__VIEWSTATE"] = page_updates.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
-        hidden_state["__VIEWSTATEGENERATOR"] = page_updates.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
-        hidden_state["__EVENTVALIDATION"] = page_updates.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
 
         page_no = next_page
         if not index_had_activity and page_no > 1:
