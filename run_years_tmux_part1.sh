@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-
-# Start tmux sessions for the FIRST half of years, each running `run_year.py`.
-# Years covered here: 2026 down to 2006 (inclusive).
-
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Detect virtual environment (prefer PROJECT_DIR/venv, then PROJECT_DIR/.venv)
 VENV_ACTIVATE=""
 if [ -f "${PROJECT_DIR}/venv/bin/activate" ]; then
   VENV_ACTIVATE="${PROJECT_DIR}/venv/bin/activate"
@@ -16,34 +11,27 @@ elif [ -f "${PROJECT_DIR}/.venv/bin/activate" ]; then
 fi
 
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "tmux is not installed. Please install tmux on the VPS and try again."
+  echo "tmux is not installed. Please install tmux and retry."
   exit 1
 fi
 
-YEARS=(
-  2026 2025 2024 2023 2022 2021 2020 2019 2018 2017
-  2016 2015 
-)
+echo "Starting part1 tmux sessions for years 2025..2005"
 
-echo "Starting tmux sessions (part 1) for years: ${YEARS[*]}"
-
-for YEAR in "${YEARS[@]}"; do
-  SESSION_NAME="igr_${YEAR}"
-
+for YEAR in $(seq 2025 -1 2005); do
+  SESSION_NAME="igr_y${YEAR}"
   if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
     echo "Session ${SESSION_NAME} already exists, skipping."
     continue
   fi
 
-  echo "Creating tmux session ${SESSION_NAME} for year ${YEAR}..."
-
+  CMD="cd "${PROJECT_DIR}" && "
   if [ -n "${VENV_ACTIVATE}" ]; then
-    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python3 run_year.py ${YEAR}"
-  else
-    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && python3 run_year.py ${YEAR}"
+    CMD+="source "${VENV_ACTIVATE}" && "
   fi
+  CMD+="python3 script_revised.py 1 ${YEAR} 1 12"
+
+  tmux new-session -d -s "${SESSION_NAME}" "${CMD}"
+  echo "Started ${SESSION_NAME}"
 done
 
-echo "Part 1 tmux sessions started (or already existed)."
-echo "Attach with: tmux attach -t igr_2026   # replace 2026 with any year in part 1"
-
+echo "Part1 complete. Use: tmux ls"

@@ -31,7 +31,6 @@ HEADLESS = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 YEAR = sys.argv[2] if len(sys.argv) > 2 else "2020"
 DISTRICT_INDEX = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 TAHSIL_INDEX = int(sys.argv[4]) if len(sys.argv) > 4 else 1
-VILLAGE_INDEX = int(sys.argv[5]) if len(sys.argv) > 5 else 1
 
 PROPERTY_START = 0
 PROPERTY_END = 9
@@ -40,10 +39,12 @@ SELENIUM_BATCH_MAX = 4
 HTTP_RETRY_MAX = 4
 HTTP_RETRY_SLEEP_SEC = 2.0
 PAGE_RECOVERY_MAX = 3
+REPORT_NO_DATA_RETRY_MAX = 3
+REPORT_NO_DATA_RETRY_SLEEP_SEC = 0.3
 
 print(
     f"HEADLESS={HEADLESS}, YEAR={YEAR}, D={DISTRICT_INDEX}, "
-    f"T={TAHSIL_INDEX}, V={VILLAGE_INDEX}, PROPS={PROPERTY_START}-{PROPERTY_END}"
+    f"T={TAHSIL_INDEX}, V=AUTO, PROPS={PROPERTY_START}-{PROPERTY_END}"
 )
 
 
@@ -281,7 +282,7 @@ def _build_driver():
     return webdriver.Chrome(options=options)
 
 
-def run_selenium_for_property(property_no: int):
+def run_selenium_for_property(property_no: int, village_index: int):
     driver = _build_driver()
     wait = WebDriverWait(driver, 20)
     try:
@@ -313,10 +314,10 @@ def run_selenium_for_property(property_no: int):
         wait.until(EC.element_to_be_clickable((By.ID, "ddltahsil")))
         Select(driver.find_element(By.ID, "ddltahsil")).select_by_index(TAHSIL_INDEX)
         _wait_for_dropdown_population(driver, "ddlvillage", timeout=25)
-        _wait_for_dropdown_has_index(driver, "ddlvillage", VILLAGE_INDEX, timeout=25)
+        _wait_for_dropdown_has_index(driver, "ddlvillage", village_index, timeout=25)
 
         wait.until(EC.element_to_be_clickable((By.ID, "ddlvillage")))
-        Select(driver.find_element(By.ID, "ddlvillage")).select_by_index(VILLAGE_INDEX)
+        Select(driver.find_element(By.ID, "ddlvillage")).select_by_index(village_index)
 
         year_used = _selected_value_or_text(driver, "ddlFromYear1")
         district_used = _selected_value_or_text(driver, "ddlDistrict1")
@@ -435,13 +436,18 @@ def _is_terminal_page_response(text: str) -> bool:
     return "0|error|500||" in t or "0|error|500|" in t
 
 
+def _is_no_data_report_html(text: str) -> bool:
+    t = (text or "").lower()
+    return "no data found for this document number in selected database" in t
+
+
 def _build_common_payload(state: dict, property_no: int, hidden_state: dict) -> dict:
     return {
         "ScriptManager1": "upRegistrationGrid|RegistrationGrid",
         "ddlFromYear1": state["year_used"] or YEAR,
         "ddlDistrict1": state["district_used"] or str(DISTRICT_INDEX),
         "ddltahsil": state["tahsil_used"] or str(TAHSIL_INDEX),
-        "ddlvillage": state["village_used"] or str(VILLAGE_INDEX),
+        "ddlvillage": state["village_used"] or "",
         "txtAttributeValue1": str(property_no),
         "txtImg1": state["captcha_used"] or "",
         "__VIEWSTATE": hidden_state.get("__VIEWSTATE", ""),
@@ -464,7 +470,7 @@ def _safe_part(s: str) -> str:
 def _save_report_html(state: dict, property_no: int, page_no: int, index_no: int, text: str):
     district_part = _safe_part(state.get("district_name") or str(DISTRICT_INDEX))
     tahsil_part = _safe_part(state.get("tahsil_name") or str(TAHSIL_INDEX))
-    village_part = _safe_part(state.get("village_name") or str(VILLAGE_INDEX))
+    village_part = _safe_part(state.get("village_name") or "unknown_village")
     year_part = _safe_part(str(state.get("year_used") or YEAR))
 
     output_dir = os.path.join("output", district_part, tahsil_part, village_part, year_part)
@@ -486,7 +492,7 @@ def _session_from_cookies(cookies):
     return session
 
 
-def _get_selenium_state_with_retries(property_no: int, context: str):
+def _get_selenium_state_with_retries(property_no: int, village_index: int, context: str):
     """
     Retry Selenium multiple times; if a retry batch fails, start fresh browser
     sessions again while keeping caller state (property/page context).
@@ -501,7 +507,7 @@ def _get_selenium_state_with_retries(property_no: int, context: str):
                     f"[SELENIUM START] property={property_no}, context={context}, "
                     f"attempt={attempt}/{PROPERTY_RETRY_MAX}, batch={batch}/{SELENIUM_BATCH_MAX}"
                 )
-                return run_selenium_for_property(property_no)
+                return run_selenium_for_property(property_no, village_index)
             except Exception as e:
                 last_exc = e
                 print(
@@ -516,7 +522,9 @@ def _get_selenium_state_with_retries(property_no: int, context: str):
             time.sleep(2.0)
     if last_exc:
         raise last_exc
-    raise Exception(f"Selenium failed for property={property_no}, context={context}")
+    raise Exception(
+        f"Selenium failed for property={property_no}, village_index={village_index}, context={context}"
+    )
 
 
 def _request_with_retry(send_fn, label: str, max_retries: int = HTTP_RETRY_MAX):
@@ -546,9 +554,11 @@ def _request_with_retry(send_fn, label: str, max_retries: int = HTTP_RETRY_MAX):
     return None
 
 
-def process_property(property_no: int):
-    print(f"\n=== PROPERTY {property_no} ===")
-    state = _get_selenium_state_with_retries(property_no, context="initial")
+def process_property(property_no: int, village_index: int):
+    print(f"\n=== PROPERTY {property_no} (village_index={village_index}) ===")
+    state = _get_selenium_state_with_retries(
+        property_no, village_index, context="initial"
+    )
     session = _session_from_cookies(state["cookies"])
 
     hidden_state = {
@@ -619,7 +629,9 @@ def process_property(property_no: int):
                 f"attempt={rec_try}/{PAGE_RECOVERY_MAX}"
             )
             refresh_state = _get_selenium_state_with_retries(
-                property_no, context=f"recover_page_{target_page}_try_{rec_try}"
+                property_no,
+                village_index,
+                context=f"recover_page_{target_page}_try_{rec_try}",
             )
             session = _session_from_cookies(refresh_state["cookies"])
             state = refresh_state
@@ -669,15 +681,36 @@ def process_property(property_no: int):
                 hidden_state["__VIEWSTATEGENERATOR"] = idx_updates.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
                 hidden_state["__EVENTVALIDATION"] = idx_updates.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
 
-            response_doc = _request_with_retry(
-                lambda: session.get(
-                    REPORT_URL,
-                    headers={"User-Agent": "Mozilla/5.0", "Referer": URL},
-                ),
-                label=f"report_get property={property_no} page={page_no} index={index_no}",
-            )
-            print("STATUS(report):", response_doc.status_code)
-            _save_report_html(state, property_no, page_no, index_no, response_doc.text)
+            response_doc = None
+            for report_try in range(1, REPORT_NO_DATA_RETRY_MAX + 1):
+                response_doc = _request_with_retry(
+                    lambda: session.get(
+                        REPORT_URL,
+                        headers={"User-Agent": "Mozilla/5.0", "Referer": URL},
+                    ),
+                    label=(
+                        f"report_get property={property_no} page={page_no} "
+                        f"index={index_no} try={report_try}"
+                    ),
+                )
+                print("STATUS(report):", response_doc.status_code)
+
+                if not _is_no_data_report_html(response_doc.text):
+                    break
+
+                print(
+                    f"[REPORT RETRY] No-data response for property={property_no}, "
+                    f"page={page_no}, index={index_no}, try={report_try}/{REPORT_NO_DATA_RETRY_MAX}"
+                )
+
+                # On final retry, wait a little longer before giving up this index.
+                if report_try < REPORT_NO_DATA_RETRY_MAX:
+                    if report_try == REPORT_NO_DATA_RETRY_MAX - 1:
+                        time.sleep(REPORT_NO_DATA_RETRY_SLEEP_SEC + 0.7)
+                    else:
+                        time.sleep(REPORT_NO_DATA_RETRY_SLEEP_SEC)
+
+            _save_report_html(state, property_no, page_no, index_no, response_doc.text if response_doc else "")
             index_had_activity = True
 
         next_page = page_no + 1
@@ -685,7 +718,7 @@ def process_property(property_no: int):
         if next_page > 1 and (next_page % 10 == 1):
             print(f"[SESSION REFRESH] property={property_no}, target_page={next_page}")
             refresh_state = _get_selenium_state_with_retries(
-                property_no, context=f"refresh_to_page_{next_page}"
+                property_no, village_index, context=f"refresh_to_page_{next_page}"
             )
             session = _session_from_cookies(refresh_state["cookies"])
             state = refresh_state
@@ -728,14 +761,77 @@ def process_property(property_no: int):
             break
 
 
-def main():
-    for property_no in range(PROPERTY_START, PROPERTY_END + 1):
+def _discover_village_indices():
+    """
+    Discover all usable village dropdown indices for selected year/district/tahsil.
+    """
+    driver = _build_driver()
+    wait = WebDriverWait(driver, 20)
+    try:
+        driver.get(URL)
         try:
-            print(f"[PROPERTY START] property={property_no}")
-            process_property(property_no)
-        except Exception as e:
-            print(f"[PROPERTY SKIP] property={property_no} failed: {e}")
-            continue
+            popup = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose"))
+            )
+            popup.click()
+        except Exception:
+            pass
+
+        wait.until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch"))).click()
+        WebDriverWait(driver, 20).until(
+            lambda d: d.find_element(By.ID, "ddlFromYear1").is_displayed()
+        )
+
+        Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(YEAR)
+        _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
+        _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
+
+        Select(driver.find_element(By.ID, "ddlDistrict1")).select_by_index(DISTRICT_INDEX)
+        _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
+        _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
+
+        Select(driver.find_element(By.ID, "ddltahsil")).select_by_index(TAHSIL_INDEX)
+        _wait_for_dropdown_population(driver, "ddlvillage", timeout=30)
+
+        sel = Select(driver.find_element(By.ID, "ddlvillage"))
+        indices = []
+        for idx, opt in enumerate(sel.options):
+            txt = (opt.text or "").strip().lower()
+            val = (opt.get_attribute("value") or "").strip()
+            if idx == 0:
+                continue
+            if not txt:
+                continue
+            if "select" in txt:
+                continue
+            # Keep valid options even if value is text/empty-ish on this site.
+            if not val and len(txt) < 2:
+                continue
+            indices.append(idx)
+        return indices
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+def main():
+    village_indices = _discover_village_indices()
+    if not village_indices:
+        print("[STOP] No village indices found for given year/district/tahsil.")
+        return
+
+    print(f"[VILLAGES] discovered {len(village_indices)} indices: {village_indices}")
+    for village_index in village_indices:
+        print(f"\n=== VILLAGE START index={village_index} ===")
+        for property_no in range(PROPERTY_START, PROPERTY_END + 1):
+            try:
+                print(f"[PROPERTY START] property={property_no}, village_index={village_index}")
+                process_property(property_no, village_index)
+            except Exception as e:
+                print(f"[PROPERTY SKIP] property={property_no}, village_index={village_index} failed: {e}")
+                continue
 
 
 if __name__ == "__main__":

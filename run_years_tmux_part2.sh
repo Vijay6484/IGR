@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-
-# Start tmux sessions for the SECOND half of years, each running `run_year.py`.
-# Years covered here: 2005 down to 1985 (inclusive).
-
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Detect virtual environment (prefer PROJECT_DIR/venv, then PROJECT_DIR/.venv)
 VENV_ACTIVATE=""
 if [ -f "${PROJECT_DIR}/venv/bin/activate" ]; then
   VENV_ACTIVATE="${PROJECT_DIR}/venv/bin/activate"
@@ -16,36 +11,27 @@ elif [ -f "${PROJECT_DIR}/.venv/bin/activate" ]; then
 fi
 
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "tmux is not installed. Please install tmux on the VPS and try again."
+  echo "tmux is not installed. Please install tmux and retry."
   exit 1
 fi
 
-YEARS=(
-  2005 2004 2003 2002 2001 2000 1999 1998 1997
-  1996 1995 1994 1993 1992 1991 1990 1989 1988 1987
-  1986 1985 2014 2013 2012 2011 2010 2009 2008 2007
-  2006
-)
+echo "Starting part2 tmux sessions for years 2004..1985"
 
-echo "Starting tmux sessions (part 2) for years: ${YEARS[*]}"
-
-for YEAR in "${YEARS[@]}"; do
-  SESSION_NAME="igr_${YEAR}"
-
+for YEAR in $(seq 2004 -1 1985); do
+  SESSION_NAME="igr_y${YEAR}"
   if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
     echo "Session ${SESSION_NAME} already exists, skipping."
     continue
   fi
 
-  echo "Creating tmux session ${SESSION_NAME} for year ${YEAR}..."
-
+  CMD="cd "${PROJECT_DIR}" && "
   if [ -n "${VENV_ACTIVATE}" ]; then
-    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python3 run_year.py ${YEAR}"
-  else
-    tmux new-session -d -s "${SESSION_NAME}" "cd \"${PROJECT_DIR}\" && python3 run_year.py ${YEAR}"
+    CMD+="source "${VENV_ACTIVATE}" && "
   fi
+  CMD+="python3 script_revised.py 1 ${YEAR} 1 12"
+
+  tmux new-session -d -s "${SESSION_NAME}" "${CMD}"
+  echo "Started ${SESSION_NAME}"
 done
 
-echo "Part 2 tmux sessions started (or already existed)."
-echo "Attach with: tmux attach -t igr_2005   # replace 2005 with any year in part 2"
-
+echo "Part2 complete. Use: tmux ls"
