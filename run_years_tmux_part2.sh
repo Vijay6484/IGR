@@ -16,22 +16,26 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 echo "Starting part2 tmux sessions for years 2004..1985"
+LOG_DIR="${PROJECT_DIR}/tmux_logs"
+mkdir -p "${LOG_DIR}"
 
 for YEAR in $(seq 2004 -1 1985); do
   SESSION_NAME="igr_y${YEAR}"
+  LOG_FILE="${LOG_DIR}/${SESSION_NAME}.log"
   if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
     echo "Session ${SESSION_NAME} already exists, skipping."
     continue
   fi
 
-  CMD="cd "${PROJECT_DIR}" && "
   if [ -n "${VENV_ACTIVATE}" ]; then
-    CMD+="source "${VENV_ACTIVATE}" && "
+    tmux new-session -d -s "${SESSION_NAME}" \
+      "bash -lc 'cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; exec bash; }'"
+  else
+    tmux new-session -d -s "${SESSION_NAME}" \
+      "bash -lc 'cd \"${PROJECT_DIR}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; exec bash; }'"
   fi
-  CMD+="python3 script_revised.py 1 ${YEAR} 1 12"
-
-  tmux new-session -d -s "${SESSION_NAME}" "${CMD}"
   echo "Started ${SESSION_NAME}"
 done
 
 echo "Part2 complete. Use: tmux ls"
+echo "Logs: ${LOG_DIR}"

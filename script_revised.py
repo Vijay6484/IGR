@@ -49,6 +49,11 @@ PAGE_RECOVERY_MAX = 3
 REPORT_NO_DATA_RETRY_MAX = 3
 REPORT_NO_DATA_RETRY_SLEEP_SEC = 0.3
 
+
+def _debug_port():
+    # Avoid collisions across parallel tmux processes
+    return 10000 + (os.getpid() % 50000)
+
 print(
     f"HEADLESS={HEADLESS}, YEAR={YEAR}, D={DISTRICT_INDEX}, "
     f"T={TAHSIL_INDEX}, V=AUTO, PROPS={PROPERTY_START}-{PROPERTY_END}"
@@ -296,7 +301,7 @@ def _build_driver():
         # VPS/headless-safe defaults
         options.add_argument("--headless=new")
         options.add_argument("--disable-gpu")
-        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument(f"--remote-debugging-port={_debug_port()}")
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-background-networking")
         options.add_argument("--disable-software-rasterizer")
@@ -354,7 +359,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
     if HEADLESS == 1:
         options.add_argument("--headless=new")
         options.add_argument("--disable-gpu")
-        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument(f"--remote-debugging-port={_debug_port()}")
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-background-networking")
         options.add_argument("--disable-software-rasterizer")
