@@ -8,6 +8,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    TimeoutException,
+    ElementNotInteractableException,
+)
 
 # ==============================
 # CONFIG
@@ -106,6 +111,39 @@ def _wait_for_dropdown_has_index(driver, dropdown_id, index, timeout=20):
     WebDriverWait(driver, timeout).until(
         lambda d: len(Select(d.find_element(By.ID, dropdown_id)).options) > index
     )
+
+
+def _select_by_visible_text_safe(driver, select_id: str, text: str, timeout=30, retries=6):
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, select_id)))
+            WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.ID, select_id)))
+            sel = Select(driver.find_element(By.ID, select_id))
+            sel.select_by_visible_text(text)
+            return
+        except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
+            last_exc = e
+            time.sleep(0.4)
+    raise last_exc
+
+
+def _select_by_index_safe(driver, select_id: str, index: int, timeout=30, retries=6):
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, select_id)))
+            WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.ID, select_id)))
+            WebDriverWait(driver, timeout).until(
+                lambda d: len(Select(d.find_element(By.ID, select_id)).options) > index
+            )
+            sel = Select(driver.find_element(By.ID, select_id))
+            sel.select_by_index(index)
+            return
+        except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
+            last_exc = e
+            time.sleep(0.4)
+    raise last_exc
 
 
 def _selected_value_or_text(driver, select_id):
@@ -358,21 +396,21 @@ def run_selenium_for_property(property_no: int, village_index: int):
         )
         print("Entered search form")
 
-        Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(YEAR)
+        _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
         _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
         _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
 
-        Select(driver.find_element(By.ID, "ddlDistrict1")).select_by_index(DISTRICT_INDEX)
+        _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
         _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
         _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
 
         wait.until(EC.element_to_be_clickable((By.ID, "ddltahsil")))
-        Select(driver.find_element(By.ID, "ddltahsil")).select_by_index(TAHSIL_INDEX)
+        _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
         _wait_for_dropdown_population(driver, "ddlvillage", timeout=25)
         _wait_for_dropdown_has_index(driver, "ddlvillage", village_index, timeout=25)
 
         wait.until(EC.element_to_be_clickable((By.ID, "ddlvillage")))
-        Select(driver.find_element(By.ID, "ddlvillage")).select_by_index(village_index)
+        _select_by_index_safe(driver, "ddlvillage", village_index)
 
         year_used = _selected_value_or_text(driver, "ddlFromYear1")
         district_used = _selected_value_or_text(driver, "ddlDistrict1")
@@ -842,15 +880,15 @@ def _discover_village_indices():
             lambda d: d.find_element(By.ID, "ddlFromYear1").is_displayed()
         )
 
-        Select(driver.find_element(By.ID, "ddlFromYear1")).select_by_visible_text(YEAR)
+        _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
         _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
         _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
 
-        Select(driver.find_element(By.ID, "ddlDistrict1")).select_by_index(DISTRICT_INDEX)
+        _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
         _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
         _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
 
-        Select(driver.find_element(By.ID, "ddltahsil")).select_by_index(TAHSIL_INDEX)
+        _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
         _wait_for_dropdown_population(driver, "ddlvillage", timeout=30)
 
         sel = Select(driver.find_element(By.ID, "ddlvillage"))

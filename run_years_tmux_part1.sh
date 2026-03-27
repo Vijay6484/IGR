@@ -28,7 +28,7 @@ for YEAR in $(seq 2025 -1 2005); do
   if [ -n "${VENV_ACTIVATE}" ]; then
     CMD+="source "${VENV_ACTIVATE}" && "
   fi
-  CMD+="python3 script_revised.py 0 ${YEAR} 1 12"
+  CMD+="python3 script_revised.py 1 ${YEAR} 1 12"
 
   tmux new-session -d -s "${SESSION_NAME}" "${CMD}"
   echo "Started ${SESSION_NAME}"
