@@ -29,10 +29,10 @@ for YEAR in $(seq 2004 -1 1985); do
 
   if [ -n "${VENV_ACTIVATE}" ]; then
     tmux new-session -d -s "${SESSION_NAME}" \
-      "bash -lc 'cd \"${PROJECT_DIR}\" && source \"${VENV_ACTIVATE}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; exec bash; }'"
+      "bash -lc 'cd \"${PROJECT_DIR}\" && mkdir -p \"${LOG_DIR}\" && source \"${VENV_ACTIVATE}\" && echo \"[START] ${SESSION_NAME}\" >> \"${LOG_FILE}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; echo \"See log: ${LOG_FILE}\"; exec bash; }'"
   else
     tmux new-session -d -s "${SESSION_NAME}" \
-      "bash -lc 'cd \"${PROJECT_DIR}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; exec bash; }'"
+      "bash -lc 'cd \"${PROJECT_DIR}\" && mkdir -p \"${LOG_DIR}\" && echo \"[START] ${SESSION_NAME}\" >> \"${LOG_FILE}\" && python3 script_revised.py 1 ${YEAR} 1 12 >> \"${LOG_FILE}\" 2>&1 || { echo FAILED_YEAR_${YEAR}; echo \"See log: ${LOG_FILE}\"; exec bash; }'"
   fi
   echo "Started ${SESSION_NAME}"
 done
