@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import shutil
+import tempfile
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -282,8 +284,61 @@ def _build_driver():
     return webdriver.Chrome(options=options)
 
 
+def _cleanup_stale_chrome_profiles():
+    """
+    Remove leftover temp Chrome user-data dirs from previous runs.
+    """
+    tmp_root = tempfile.gettempdir()
+    try:
+        for name in os.listdir(tmp_root):
+            if not name.startswith("igr_chrome_profile_"):
+                continue
+            path = os.path.join(tmp_root, name)
+            if os.path.isdir(path):
+                try:
+                    shutil.rmtree(path, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def run_selenium_for_property(property_no: int, village_index: int):
-    driver = _build_driver()
+    _cleanup_stale_chrome_profiles()
+    profile_dir = tempfile.mkdtemp(prefix="igr_chrome_profile_")
+    driver = None
+    # Build a per-session browser instance using dedicated user-data-dir.
+    options = webdriver.ChromeOptions()
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument(f"--user-data-dir={profile_dir}")
+    if HEADLESS == 1:
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-software-rasterizer")
+
+        env_bin = os.environ.get("CHROME_BINARY", "").strip()
+        if env_bin and os.path.exists(env_bin):
+            options.binary_location = env_bin
+        else:
+            linux_candidates = (
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+            )
+            for p in linux_candidates:
+                if os.path.exists(p):
+                    options.binary_location = p
+                    break
+    else:
+        options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+
+    driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 20)
     try:
         driver.get(URL)
@@ -406,7 +461,12 @@ def run_selenium_for_property(property_no: int, village_index: int):
         }
     finally:
         try:
-            driver.quit()
+            if driver is not None:
+                driver.quit()
+        except Exception:
+            pass
+        try:
+            shutil.rmtree(profile_dir, ignore_errors=True)
         except Exception:
             pass
 
