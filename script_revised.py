@@ -868,55 +868,92 @@ def _discover_village_indices():
     """
     Discover all usable village dropdown indices for selected year/district/tahsil.
     """
-    driver = _build_driver()
-    wait = WebDriverWait(driver, 20)
-    try:
-        driver.get(URL)
+    last_exc = None
+    for attempt in range(1, 4):
+        driver = _build_driver()
+        wait = WebDriverWait(driver, 25)
         try:
-            popup = WebDriverWait(driver, 3).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose"))
-            )
-            popup.click()
-        except Exception:
-            pass
+            print(f"[VILLAGE DISCOVERY] attempt {attempt}/3")
+            driver.get(URL)
 
-        wait.until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch"))).click()
-        WebDriverWait(driver, 20).until(
-            lambda d: d.find_element(By.ID, "ddlFromYear1").is_displayed()
-        )
+            try:
+                popup = WebDriverWait(driver, 4).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose"))
+                )
+                popup.click()
+            except Exception:
+                pass
 
-        _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
-        _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
-        _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
+            # Site is flaky in headless mode; retry opening search form once after refresh.
+            opened = False
+            for open_try in range(1, 3):
+                try:
+                    btn = wait.until(EC.presence_of_element_located((By.ID, "btnOtherdistrictSearch")))
+                    try:
+                        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch")))
+                        btn.click()
+                    except Exception:
+                        driver.execute_script("arguments[0].click();", btn)
 
-        _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
-        _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
-        _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
+                    WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.ID, "ddlFromYear1"))
+                    )
+                    opened = True
+                    break
+                except Exception:
+                    if open_try == 1:
+                        driver.refresh()
+                        time.sleep(1.2)
+                        try:
+                            popup = WebDriverWait(driver, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, ".btnclose"))
+                            )
+                            popup.click()
+                        except Exception:
+                            pass
+                        continue
+                    raise
 
-        _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
-        _wait_for_dropdown_population(driver, "ddlvillage", timeout=30)
+            if not opened:
+                raise TimeoutException("Could not open search form")
 
-        sel = Select(driver.find_element(By.ID, "ddlvillage"))
-        indices = []
-        for idx, opt in enumerate(sel.options):
-            txt = (opt.text or "").strip().lower()
-            val = (opt.get_attribute("value") or "").strip()
-            if idx == 0:
-                continue
-            if not txt:
-                continue
-            if "select" in txt:
-                continue
-            # Keep valid options even if value is text/empty-ish on this site.
-            if not val and len(txt) < 2:
-                continue
-            indices.append(idx)
-        return indices
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+            _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
+            _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
+            _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
+
+            _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
+            _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
+            _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
+
+            _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
+            _wait_for_dropdown_population(driver, "ddlvillage", timeout=30)
+
+            sel = Select(driver.find_element(By.ID, "ddlvillage"))
+            indices = []
+            for idx, opt in enumerate(sel.options):
+                txt = (opt.text or "").strip().lower()
+                val = (opt.get_attribute("value") or "").strip()
+                if idx == 0:
+                    continue
+                if not txt:
+                    continue
+                if "select" in txt:
+                    continue
+                # Keep valid options even if value is text/empty-ish on this site.
+                if not val and len(txt) < 2:
+                    continue
+                indices.append(idx)
+            return indices
+        except Exception as e:
+            last_exc = e
+            print(f"[VILLAGE DISCOVERY RETRY] attempt {attempt}/3 failed: {e}")
+            time.sleep(1.5)
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+    raise last_exc
 
 
 def main():
