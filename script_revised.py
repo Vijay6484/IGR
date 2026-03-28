@@ -62,20 +62,27 @@ print(
 
 def solve_captcha(driver):
     print("Solving captcha...")
-    img = driver.find_element(By.ID, "imgCaptcha_new")
-
-    img_base64 = driver.execute_script(
-        """
-        var img = arguments[0];
-        var canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        return canvas.toDataURL('image/png').split(',')[1];
-        """,
-        img,
-    )
+    img_base64 = None
+    for _ in range(8):
+        try:
+            img = driver.find_element(By.ID, "imgCaptcha_new")
+            img_base64 = driver.execute_script(
+                """
+                var img = arguments[0];
+                var canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                return canvas.toDataURL('image/png').split(',')[1];
+                """,
+                img,
+            )
+            break
+        except StaleElementReferenceException:
+            time.sleep(0.25)
+    if img_base64 is None or img_base64 == "":
+        raise RuntimeError("could not snapshot captcha image after retries")
 
     task = {
         "clientKey": CAPTCHA_API_KEY,
@@ -118,6 +125,41 @@ def _wait_for_dropdown_has_index(driver, dropdown_id, index, timeout=20):
     )
 
 
+def _wait_for_aspnet_ajax_idle(driver, timeout=45, poll=0.12):
+    """
+    Wait until ASP.NET AJAX (ScriptManager / PageRequestManager) finishes an async
+    postback so UpdatePanel DOM is stable (reduces stale element errors).
+    """
+    deadline = time.time() + timeout
+    stable = 0
+    required_stable = 2
+    while time.time() < deadline:
+        try:
+            busy = driver.execute_script(
+                """
+                try {
+                    if (typeof Sys !== 'undefined' && Sys.WebForms && Sys.WebForms.PageRequestManager) {
+                        var prm = Sys.WebForms.PageRequestManager.getInstance();
+                        if (prm && typeof prm.get_isInAsyncPostBack === 'function') {
+                            return prm.get_isInAsyncPostBack();
+                        }
+                    }
+                } catch (e) {}
+                return false;
+                """
+            )
+        except Exception:
+            busy = False
+        if not busy:
+            stable += 1
+            if stable >= required_stable:
+                time.sleep(0.22)
+                return
+        else:
+            stable = 0
+        time.sleep(poll)
+
+
 def _select_by_visible_text_safe(driver, select_id: str, text: str, timeout=30, retries=6):
     last_exc = None
     for attempt in range(1, retries + 1):
@@ -126,6 +168,7 @@ def _select_by_visible_text_safe(driver, select_id: str, text: str, timeout=30, 
             WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.ID, select_id)))
             sel = Select(driver.find_element(By.ID, select_id))
             sel.select_by_visible_text(text)
+            _wait_for_aspnet_ajax_idle(driver, timeout=min(timeout, 45))
             return
         except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
             last_exc = e
@@ -144,6 +187,7 @@ def _select_by_index_safe(driver, select_id: str, index: int, timeout=30, retrie
             )
             sel = Select(driver.find_element(By.ID, select_id))
             sel.select_by_index(index)
+            _wait_for_aspnet_ajax_idle(driver, timeout=min(timeout, 45))
             return
         except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
             last_exc = e
@@ -151,18 +195,76 @@ def _select_by_index_safe(driver, select_id: str, index: int, timeout=30, retrie
     raise last_exc
 
 
+def _click_by_id_safe(
+    driver,
+    element_id: str,
+    timeout=25,
+    retries=8,
+    wait_ajax_after=True,
+):
+    last_exc = None
+    for _ in range(1, retries + 1):
+        try:
+            WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.ID, element_id)))
+            driver.find_element(By.ID, element_id).click()
+            if wait_ajax_after:
+                _wait_for_aspnet_ajax_idle(driver, timeout=50)
+            return
+        except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
+            last_exc = e
+            time.sleep(0.35)
+    if last_exc:
+        raise last_exc
+    raise TimeoutException(f"click failed: {element_id}")
+
+
+def _clear_send_keys_safe(driver, element_id: str, text: str, timeout=25, retries=8):
+    last_exc = None
+    for _ in range(1, retries + 1):
+        try:
+            WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.ID, element_id)))
+            el = driver.find_element(By.ID, element_id)
+            el.clear()
+            el.send_keys(text)
+            return
+        except (StaleElementReferenceException, TimeoutException, ElementNotInteractableException) as e:
+            last_exc = e
+            time.sleep(0.35)
+    if last_exc:
+        raise last_exc
+    raise TimeoutException(f"input failed: {element_id}")
+
+
 def _selected_value_or_text(driver, select_id):
-    sel = Select(driver.find_element(By.ID, select_id))
-    opt = sel.first_selected_option
-    val = opt.get_attribute("value")
-    if val is not None and val != "":
-        return val
-    return (opt.text or "").strip()
+    last_exc = None
+    for _ in range(1, 10):
+        try:
+            sel = Select(driver.find_element(By.ID, select_id))
+            opt = sel.first_selected_option
+            val = opt.get_attribute("value")
+            if val is not None and val != "":
+                return val
+            return (opt.text or "").strip()
+        except StaleElementReferenceException as e:
+            last_exc = e
+            time.sleep(0.3)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"could not read selected value for {select_id}")
 
 
 def _selected_text(driver, select_id):
-    sel = Select(driver.find_element(By.ID, select_id))
-    return (sel.first_selected_option.text or "").strip()
+    last_exc = None
+    for _ in range(1, 10):
+        try:
+            sel = Select(driver.find_element(By.ID, select_id))
+            return (sel.first_selected_option.text or "").strip()
+        except StaleElementReferenceException as e:
+            last_exc = e
+            time.sleep(0.3)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"could not read selected text for {select_id}")
 
 
 def _wait_for_captcha_loaded(driver, baseline_src=None, timeout=30):
@@ -236,8 +338,9 @@ def _any_visible_error_text(driver):
 
 
 def _wait_for_search_outcome(driver, timeout=120):
+    _wait_for_aspnet_ajax_idle(driver, timeout=min(60, max(15, timeout // 2)))
     start = time.time()
-    time.sleep(1)
+    time.sleep(0.35)
     while True:
         try:
             grid = driver.find_element(By.ID, "RegistrationGrid")
@@ -382,7 +485,6 @@ def run_selenium_for_property(property_no: int, village_index: int):
         options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 
     driver = webdriver.Chrome(options=options)
-    wait = WebDriverWait(driver, 20)
     try:
         driver.get(URL)
 
@@ -395,26 +497,28 @@ def run_selenium_for_property(property_no: int, village_index: int):
         except Exception:
             pass
 
-        wait.until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch"))).click()
+        _click_by_id_safe(driver, "btnOtherdistrictSearch")
         WebDriverWait(driver, 20).until(
             lambda d: d.find_element(By.ID, "ddlFromYear1").is_displayed()
         )
+        _wait_for_aspnet_ajax_idle(driver, timeout=25)
         print("Entered search form")
 
         _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
         _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
         _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
+        _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
         _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
         _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
         _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
+        _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
-        wait.until(EC.element_to_be_clickable((By.ID, "ddltahsil")))
         _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
         _wait_for_dropdown_population(driver, "ddlvillage", timeout=25)
         _wait_for_dropdown_has_index(driver, "ddlvillage", village_index, timeout=25)
+        _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
-        wait.until(EC.element_to_be_clickable((By.ID, "ddlvillage")))
         _select_by_index_safe(driver, "ddlvillage", village_index)
 
         year_used = _selected_value_or_text(driver, "ddlFromYear1")
@@ -425,9 +529,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
         tahsil_name = _selected_text(driver, "ddltahsil")
         village_name = _selected_text(driver, "ddlvillage")
 
-        prop_input = driver.find_element(By.ID, "txtAttributeValue1")
-        prop_input.clear()
-        prop_input.send_keys(str(property_no))
+        _clear_send_keys_safe(driver, "txtAttributeValue1", str(property_no))
 
         max_dummy_attempts = 4
         for attempt in range(1, max_dummy_attempts + 1):
@@ -437,10 +539,8 @@ def run_selenium_for_property(property_no: int, village_index: int):
             except Exception:
                 pass
 
-            cap_box = wait.until(EC.element_to_be_clickable((By.ID, "txtImg1")))
-            cap_box.clear()
-            cap_box.send_keys("1")
-            driver.find_element(By.ID, "btnSearch_RestMaha").click()
+            _clear_send_keys_safe(driver, "txtImg1", "1")
+            _click_by_id_safe(driver, "btnSearch_RestMaha")
             print(f"Dummy captcha submitted (attempt {attempt}/{max_dummy_attempts}), waiting for new captcha...")
 
             try:
@@ -456,9 +556,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
 
         captcha_text = (solve_captcha(driver) or "").upper()
         print("Captcha:", captcha_text)
-        cap_input = driver.find_element(By.ID, "txtImg1")
-        cap_input.clear()
-        cap_input.send_keys(captcha_text)
+        _clear_send_keys_safe(driver, "txtImg1", captcha_text)
 
         pre_submit_viewstate = ""
         try:
@@ -466,7 +564,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
         except Exception:
             pass
 
-        driver.find_element(By.ID, "btnSearch_RestMaha").click()
+        _click_by_id_safe(driver, "btnSearch_RestMaha")
         status, message = _wait_for_search_outcome(driver, timeout=120)
 
         if status == "success":
@@ -871,7 +969,6 @@ def _discover_village_indices():
     last_exc = None
     for attempt in range(1, 4):
         driver = _build_driver()
-        wait = WebDriverWait(driver, 25)
         try:
             print(f"[VILLAGE DISCOVERY] attempt {attempt}/3")
             driver.get(URL)
@@ -888,16 +985,11 @@ def _discover_village_indices():
             opened = False
             for open_try in range(1, 3):
                 try:
-                    btn = wait.until(EC.presence_of_element_located((By.ID, "btnOtherdistrictSearch")))
-                    try:
-                        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "btnOtherdistrictSearch")))
-                        btn.click()
-                    except Exception:
-                        driver.execute_script("arguments[0].click();", btn)
-
+                    _click_by_id_safe(driver, "btnOtherdistrictSearch")
                     WebDriverWait(driver, 20).until(
-                        EC.presence_of_element_located((By.ID, "ddlFromYear1"))
+                        lambda d: d.find_element(By.ID, "ddlFromYear1").is_displayed()
                     )
+                    _wait_for_aspnet_ajax_idle(driver, timeout=25)
                     opened = True
                     break
                 except Exception:
@@ -920,29 +1012,41 @@ def _discover_village_indices():
             _select_by_visible_text_safe(driver, "ddlFromYear1", YEAR)
             _wait_for_dropdown_population(driver, "ddlDistrict1", timeout=20)
             _wait_for_dropdown_has_index(driver, "ddlDistrict1", DISTRICT_INDEX, timeout=20)
+            _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
             _select_by_index_safe(driver, "ddlDistrict1", DISTRICT_INDEX)
             _wait_for_dropdown_population(driver, "ddltahsil", timeout=25)
             _wait_for_dropdown_has_index(driver, "ddltahsil", TAHSIL_INDEX, timeout=25)
+            _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
             _select_by_index_safe(driver, "ddltahsil", TAHSIL_INDEX)
             _wait_for_dropdown_population(driver, "ddlvillage", timeout=30)
+            _wait_for_aspnet_ajax_idle(driver, timeout=35)
 
-            sel = Select(driver.find_element(By.ID, "ddlvillage"))
             indices = []
-            for idx, opt in enumerate(sel.options):
-                txt = (opt.text or "").strip().lower()
-                val = (opt.get_attribute("value") or "").strip()
-                if idx == 0:
-                    continue
-                if not txt:
-                    continue
-                if "select" in txt:
-                    continue
-                # Keep valid options even if value is text/empty-ish on this site.
-                if not val and len(txt) < 2:
-                    continue
-                indices.append(idx)
+            last_stale = None
+            for _ in range(8):
+                try:
+                    sel = Select(driver.find_element(By.ID, "ddlvillage"))
+                    for idx, opt in enumerate(sel.options):
+                        txt = (opt.text or "").strip().lower()
+                        val = (opt.get_attribute("value") or "").strip()
+                        if idx == 0:
+                            continue
+                        if not txt:
+                            continue
+                        if "select" in txt:
+                            continue
+                        # Keep valid options even if value is text/empty-ish on this site.
+                        if not val and len(txt) < 2:
+                            continue
+                        indices.append(idx)
+                    return indices
+                except StaleElementReferenceException as e:
+                    last_stale = e
+                    time.sleep(0.35)
+            if last_stale:
+                raise last_stale
             return indices
         except Exception as e:
             last_exc = e
