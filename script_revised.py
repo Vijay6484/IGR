@@ -21,6 +21,10 @@ class NoRegistrationRecordsError(Exception):
     """Search ran (captcha OK) but the registration grid has no rows to scrape for this property."""
 
 
+class IndexDocumentUnavailableError(Exception):
+    """indexII POST returned 0|error|500|| — that grid cell has no document; skip rest of this property."""
+
+
 # Phrases in lblMsg / grid that mean zero results (skip property, do not treat as hard failure).
 _NO_RECORD_LABEL_PHRASES = (
     "no data",
@@ -64,8 +68,9 @@ SELENIUM_BATCH_MAX = 4
 HTTP_RETRY_MAX = 4
 HTTP_RETRY_SLEEP_SEC = 2.0
 PAGE_RECOVERY_MAX = 3
-REPORT_NO_DATA_RETRY_MAX = 3
-REPORT_NO_DATA_RETRY_SLEEP_SEC = 0.3
+# Report download: only GET retries (never re-POST indexII). 1 initial + 3 retries = 4 attempts.
+REPORT_GET_MAX_ATTEMPTS = 4
+REPORT_GET_RETRY_SLEEP_SEC = 0.35
 
 
 def _debug_port():
@@ -409,8 +414,13 @@ def _selenium_has_any_registration_records(driver) -> bool:
 def _pager_shows_page_one(html: str) -> bool:
     if re.search(r"Page\s*1\s+of\s+\d+", html or "", re.I):
         return True
+    if re.search(r"Page\s*1\s*/\s*\d+", html or "", re.I):
+        return True
     m = re.search(r"Page\s*(\d+)\s+of\s+\d+", html or "", re.I)
-    return bool(m and int(m.group(1)) == 1)
+    if m and int(m.group(1)) == 1:
+        return True
+    m2 = re.search(r"Page\s*(\d+)\s*/\s*\d+", html or "", re.I)
+    return bool(m2 and int(m2.group(1)) == 1)
 
 
 def _click_pager_first_or_prev(driver) -> bool:
@@ -446,7 +456,69 @@ def _click_pager_first_or_prev(driver) -> bool:
         return False
 
 
-def _selenium_ensure_grid_on_page_one(driver, max_rounds: int = 80, total_pages: int | None = None) -> None:
+def _click_grid_pager_page_number(driver, page_num: int) -> bool:
+    """
+    Click a RegistrationGrid pager link for page N: Page$N in href, or visible text 'N' on a Page$ postback.
+    """
+    try:
+        return bool(
+            driver.execute_script(
+                """
+                var n = arguments[0];
+                var s = String(n);
+                var needle1 = 'Page$' + s;
+                var needle2 = 'Page%24' + s;
+                var g = document.getElementById('RegistrationGrid');
+                if (!g) return false;
+                var links = g.querySelectorAll('a[href]');
+                for (var i = 0; i < links.length; i++) {
+                    var a = links[i];
+                    var h = a.getAttribute('href') || '';
+                    if (h.indexOf('doPostBack') < 0 && h.indexOf('__doPostBack') < 0) continue;
+                    if (h.indexOf(needle1) >= 0 || h.indexOf(needle2) >= 0) {
+                        a.click();
+                        return true;
+                    }
+                }
+                for (var j = 0; j < links.length; j++) {
+                    var a2 = links[j];
+                    var h2 = a2.getAttribute('href') || '';
+                    if ((a2.textContent || '').trim() !== s) continue;
+                    if (h2.indexOf('Page$') >= 0 || h2.indexOf('Page%24') >= 0) {
+                        a2.click();
+                        return true;
+                    }
+                }
+                return false;
+                """,
+                int(page_num),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _try_dopostback_registration_grid_page_one(driver) -> bool:
+    """Last resort: call ASP.NET __doPostBack for RegistrationGrid Page$1 if exposed on the page."""
+    try:
+        return bool(
+            driver.execute_script(
+                """
+                try {
+                    if (typeof __doPostBack === 'function') {
+                        __doPostBack('RegistrationGrid', 'Page$1');
+                        return true;
+                    }
+                } catch (e) {}
+                return false;
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def _selenium_ensure_grid_on_page_one(driver, max_rounds: int = 16, total_pages: int | None = None) -> None:
     """After pager exploration, return the grid to page 1 so ViewState matches HTTP start."""
     if total_pages == 1:
         print("[PAGER] total_pages=1 — already on the only page; skipping return-to-page-one")
@@ -458,7 +530,11 @@ def _selenium_ensure_grid_on_page_one(driver, max_rounds: int = 80, total_pages:
         except Exception:
             raise RuntimeError("RegistrationGrid missing while returning to page 1")
         if _pager_shows_page_one(html):
+            print("[PAGER] grid is on page 1 (label/HTML check)")
             return
+        if _click_grid_pager_page_number(driver, 1):
+            time.sleep(0.2)
+            continue
         if _pagination_probe_click_page_postback(driver, 1):
             time.sleep(0.2)
             continue
@@ -466,47 +542,83 @@ def _selenium_ensure_grid_on_page_one(driver, max_rounds: int = 80, total_pages:
             time.sleep(0.2)
             continue
         print(f"[PAGER] warn: could not move toward page 1 (round {r}/{max_rounds})")
-        time.sleep(0.35)
+        time.sleep(0.25)
+    if _try_dopostback_registration_grid_page_one(driver):
+        _wait_for_aspnet_ajax_idle(driver, timeout=35)
+        time.sleep(0.3)
+        try:
+            html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+            if _pager_shows_page_one(html):
+                print("[PAGER] grid on page 1 after __doPostBack(Page$1)")
+                return
+        except Exception:
+            pass
+    try:
+        html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+        if _pager_shows_page_one(html):
+            print("[PAGER] grid on page 1 after final check")
+            return
+    except Exception:
+        pass
     raise RuntimeError(
         "Could not return RegistrationGrid to page 1 after counting pages; "
-        "try headed browser or increase max_rounds."
+        "try headed browser or inspect pager markup."
     )
 
 
-def _selenium_count_total_pages_via_ellipsis(driver) -> int:
+def _selenium_count_total_pages_via_ellipsis(driver) -> tuple[int, bool]:
     """
-    Walk pager using '...' / ellipsis until no more, tracking the highest page number seen.
-    Also considers Page X of Y and all visible Page$N links in each view.
+    Discover total page count. If 'Page X of Y' is present on the first paint, use Y and do not
+    navigate (avoids useless ellipsis + return-to-page-one). Otherwise walk ellipsis.
+
+    Returns (total_pages, pager_was_navigated).
     """
-    max_n = 1
+    _wait_for_aspnet_ajax_idle(driver, timeout=45)
+    try:
+        html0 = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+    except Exception:
+        return 1, False
+
+    label_tot, link_max0 = _pager_info_from_text(html0)
+    if label_tot is not None:
+        total = max(int(label_tot), 1)
+        print(f"[PAGER] total_pages={total} from pager label (no navigation — skipping return-to-page-one)")
+        return total, False
+
+    max_n = link_max0 or 1
+    moved = False
     for sweep in range(1, 200):
         _wait_for_aspnet_ajax_idle(driver, timeout=45)
         try:
             html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
         except Exception:
             break
-        label_tot, link_max = _pager_info_from_text(html)
+        _, link_max = _pager_info_from_text(html)
         if link_max:
             max_n = max(max_n, link_max)
-        if label_tot:
-            max_n = max(max_n, label_tot)
         if _pagination_probe_click_ellipsis_in_grid(driver):
+            moved = True
             time.sleep(0.25)
             continue
         break
+
     _wait_for_aspnet_ajax_idle(driver, timeout=35)
     try:
         html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
-        label_tot, link_max = _pager_info_from_text(html)
+        label2, link_max = _pager_info_from_text(html)
         if link_max:
             max_n = max(max_n, link_max)
-        if label_tot:
-            max_n = max(max_n, label_tot)
+        if label2:
+            max_n = max(max_n, label2)
     except Exception:
         pass
+
     total = max(max_n, 1)
-    print(f"[PAGER] Selenium counted total_pages={total} (ellipsis walk + pager markup)")
-    return total
+    if moved:
+        print(f"[PAGER] Selenium counted total_pages={total} (ellipsis walk; will return to page 1)")
+    else:
+        print(f"[PAGER] total_pages={total} from visible pager links (no ellipsis — skipping return-to-page-one)")
+    return total, moved
 
 
 def _wait_hidden_fields_ready(driver, prev_viewstate="", timeout=30):
@@ -902,8 +1014,11 @@ def run_selenium_for_property(property_no: int, village_index: int, pagination_p
         if not _selenium_has_any_registration_records(driver):
             raise NoRegistrationRecordsError("no index-II rows in grid for this property")
 
-        total_pages = _selenium_count_total_pages_via_ellipsis(driver)
-        _selenium_ensure_grid_on_page_one(driver, total_pages=total_pages)
+        total_pages, pager_moved = _selenium_count_total_pages_via_ellipsis(driver)
+        if pager_moved:
+            _selenium_ensure_grid_on_page_one(driver, total_pages=total_pages)
+        else:
+            print("[PAGER] no pager navigation during count — ViewState stays on page 1")
         _wait_hidden_fields_ready(driver, prev_viewstate="", timeout=35)
 
         _, viewstate = _field(driver, "__VIEWSTATE")
@@ -1010,9 +1125,48 @@ def _is_terminal_page_response(text: str) -> bool:
     return "0|error|500||" in t or "0|error|500|" in t
 
 
+def _report_visible_text_len(html: str) -> int:
+    if not html:
+        return 0
+    t = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html)
+    t = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    return len(re.sub(r"\s+", " ", t).strip())
+
+
 def _is_no_data_report_html(text: str) -> bool:
-    t = (text or "").lower()
-    return "no data found for this document number in selected database" in t
+    """Site 'no document' page (wording/casing variants)."""
+    if not text:
+        return False
+    t = re.sub(r"\s+", " ", (text or "").lower())
+    if "no data found" not in t:
+        return False
+    if "document" in t and "database" in t:
+        return True
+    if "selected database" in t:
+        return True
+    return False
+
+
+def _report_get_should_retry(text: str | None, raw_len: int) -> bool:
+    """
+    True → repeat GET to REPORT_URL only (do not re-post indexII).
+    Covers empty/0-byte body, no-data message, and empty report shell HTML.
+    """
+    text = text or ""
+    if raw_len == 0:
+        return True
+    if not text.strip():
+        return True
+    if _is_no_data_report_html(text):
+        return True
+    tl = text.lower()
+    if "report.jpg" in tl and "background" in tl and "no data" in tl:
+        return True
+    # Nearly empty report page: VIEWSTATE shell with almost no visible content
+    if "__VIEWSTATE" in text and _report_visible_text_len(text) < 30:
+        return True
+    return False
 
 
 def _build_common_payload(state: dict, property_no: int, hidden_state: dict) -> dict:
@@ -1265,8 +1419,13 @@ def process_property(property_no: int, village_index: int):
             print((response_index.text or "")[:500])
 
             if _is_terminal_page_response(response_index.text):
-                print(f"[INDEX STOP] property={property_no}, page={page_no}, index={index_no} -> terminal response")
-                break
+                print(
+                    f"[INDEX UNAVAILABLE] property={property_no}, page={page_no}, index={index_no} "
+                    f"-> 0|error|500|| (document not available for this index) — next property"
+                )
+                raise IndexDocumentUnavailableError(
+                    f"property={property_no} page={page_no} index={index_no}: indexII returned 0|error|500||"
+                )
 
             idx_updates = _extract_hidden_fields_from_msajax_delta(response_index.text)
             if idx_updates:
@@ -1275,7 +1434,7 @@ def process_property(property_no: int, village_index: int):
                 hidden_state["__EVENTVALIDATION"] = idx_updates.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
 
             response_doc = None
-            for report_try in range(1, REPORT_NO_DATA_RETRY_MAX + 1):
+            for get_try in range(1, REPORT_GET_MAX_ATTEMPTS + 1):
                 response_doc = _request_with_retry(
                     lambda: session.get(
                         REPORT_URL,
@@ -1283,25 +1442,28 @@ def process_property(property_no: int, village_index: int):
                     ),
                     label=(
                         f"report_get property={property_no} page={page_no} "
-                        f"index={index_no} try={report_try}"
+                        f"index={index_no} get={get_try}/{REPORT_GET_MAX_ATTEMPTS}"
                     ),
                 )
-                print("STATUS(report):", response_doc.status_code)
+                print("STATUS(report):", getattr(response_doc, "status_code", None))
 
-                if not _is_no_data_report_html(response_doc.text):
+                body = (response_doc.text if response_doc else "") or ""
+                raw = response_doc.content if response_doc else b""
+                raw_len = len(raw) if raw is not None else 0
+
+                if not _report_get_should_retry(body, raw_len):
                     break
 
                 print(
-                    f"[REPORT RETRY] No-data response for property={property_no}, "
-                    f"page={page_no}, index={index_no}, try={report_try}/{REPORT_NO_DATA_RETRY_MAX}"
+                    f"[REPORT GET RETRY] property={property_no} page={page_no} index={index_no} "
+                    f"GET {get_try}/{REPORT_GET_MAX_ATTEMPTS} (empty/no-data/shell — GET only, no index re-post)"
                 )
 
-                # On final retry, wait a little longer before giving up this index.
-                if report_try < REPORT_NO_DATA_RETRY_MAX:
-                    if report_try == REPORT_NO_DATA_RETRY_MAX - 1:
-                        time.sleep(REPORT_NO_DATA_RETRY_SLEEP_SEC + 0.7)
+                if get_try < REPORT_GET_MAX_ATTEMPTS:
+                    if get_try == REPORT_GET_MAX_ATTEMPTS - 1:
+                        time.sleep(REPORT_GET_RETRY_SLEEP_SEC + 0.65)
                     else:
-                        time.sleep(REPORT_NO_DATA_RETRY_SLEEP_SEC)
+                        time.sleep(REPORT_GET_RETRY_SLEEP_SEC)
 
             _save_report_html(state, property_no, page_no, index_no, response_doc.text if response_doc else "")
             index_had_activity = True
@@ -1474,6 +1636,12 @@ def main():
             try:
                 print(f"[PROPERTY START] property={property_no}, village_index={village_index}")
                 process_property(property_no, village_index)
+            except IndexDocumentUnavailableError as e:
+                print(
+                    f"[NEXT PROPERTY] property={property_no}, village_index={village_index} "
+                    f"(index document unavailable): {e}"
+                )
+                continue
             except NoRegistrationRecordsError as e:
                 print(
                     f"[NO RECORDS — NEXT PROPERTY] property={property_no}, "
