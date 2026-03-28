@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import shutil
@@ -12,6 +13,22 @@ from selenium.common.exceptions import (
     StaleElementReferenceException,
     TimeoutException,
     ElementNotInteractableException,
+)
+
+
+class NoRegistrationRecordsError(Exception):
+    """Search ran (captcha OK) but the registration grid has no rows to scrape for this property."""
+
+
+# Phrases in lblMsg / grid that mean zero results (skip property, do not treat as hard failure).
+_NO_RECORD_LABEL_PHRASES = (
+    "no data",
+    "no record",
+    "not found",
+    "does not exist",
+    "no result",
+    "no registration",
+    "no document",
 )
 
 # ==============================
@@ -337,14 +354,46 @@ def _any_visible_error_text(driver):
     return None
 
 
+def _registration_grid_has_result_rows(driver) -> bool:
+    """
+    True only if RegistrationGrid shows actionable result rows (not just an empty shell).
+    Aligns with postbacks like indexII$0 used later over HTTP.
+    """
+    try:
+        grid = driver.find_element(By.ID, "RegistrationGrid")
+        if not grid.is_displayed():
+            return False
+        blob = (grid.text or "").strip().lower()
+        if blob and any(p in blob for p in _NO_RECORD_LABEL_PHRASES):
+            return False
+        for a in grid.find_elements(By.TAG_NAME, "a"):
+            try:
+                href = (a.get_attribute("href") or "")
+                hl = href.lower()
+                if "indexii" in hl:
+                    return True
+                if "__dopostback" in hl and "registrationgrid" in hl:
+                    return True
+            except StaleElementReferenceException:
+                return False
+        tds = grid.find_elements(By.CSS_SELECTOR, "tbody tr td")
+        if len(tds) >= 2:
+            return True
+        tds = grid.find_elements(By.CSS_SELECTOR, "tr td")
+        return len(tds) >= 3
+    except Exception:
+        return False
+
+
 def _wait_for_search_outcome(driver, timeout=120):
     _wait_for_aspnet_ajax_idle(driver, timeout=min(60, max(15, timeout // 2)))
     start = time.time()
     time.sleep(0.35)
     while True:
+        # Prefer detecting real grid rows first (lblMsg can fill before/without the grid).
         try:
             grid = driver.find_element(By.ID, "RegistrationGrid")
-            if grid and grid.is_displayed():
+            if grid and grid.is_displayed() and _registration_grid_has_result_rows(driver):
                 return ("success", None)
         except Exception:
             pass
@@ -354,6 +403,9 @@ def _wait_for_search_outcome(driver, timeout=120):
             if msg_el and msg_el.is_displayed():
                 txt = (msg_el.text or "").strip()
                 if txt:
+                    tl = txt.lower()
+                    if any(p in tl for p in _NO_RECORD_LABEL_PHRASES):
+                        return ("no_records", txt)
                     return ("message", txt)
         except Exception:
             pass
@@ -363,6 +415,12 @@ def _wait_for_search_outcome(driver, timeout=120):
             return ("error", msg)
 
         if time.time() - start > timeout:
+            try:
+                grid = driver.find_element(By.ID, "RegistrationGrid")
+                if grid and grid.is_displayed() and not _registration_grid_has_result_rows(driver):
+                    return ("no_records", "registration grid visible but no data rows")
+            except Exception:
+                pass
             return ("timeout", None)
         time.sleep(0.25)
 
@@ -568,7 +626,9 @@ def run_selenium_for_property(property_no: int, village_index: int):
         status, message = _wait_for_search_outcome(driver, timeout=120)
 
         if status == "success":
-            print("✅ Search completed")
+            print("✅ Search completed — registration rows present")
+        elif status == "no_records":
+            raise NoRegistrationRecordsError(message or "no registration rows for this property")
         elif status == "message":
             print("ℹ️ Site message after submit:", message)
         elif status == "error":
@@ -578,6 +638,13 @@ def run_selenium_for_property(property_no: int, village_index: int):
             raise Exception("Search timed out waiting for results or error message")
 
         _wait_hidden_fields_ready(driver, prev_viewstate=pre_submit_viewstate, timeout=30)
+
+        pager_total_pages, pager_total_pages_is_exact = _read_pager_state_from_registration_grid(driver)
+        if pager_total_pages is not None:
+            print(
+                f"[PAGER] UI: {pager_total_pages} page(s)"
+                f"{' (exact — Page X of Y)' if pager_total_pages_is_exact else ' (from pager links; may increase)'}",
+            )
 
         _, viewstate = _field(driver, "__VIEWSTATE")
         _, eventvalidation = _field(driver, "__EVENTVALIDATION")
@@ -599,6 +666,8 @@ def run_selenium_for_property(property_no: int, village_index: int):
             "viewstate_gen": viewstate_gen,
             "eventvalidation": eventvalidation,
             "cookies": cookies,
+            "pager_total_pages": pager_total_pages,
+            "pager_total_pages_is_exact": pager_total_pages_is_exact,
         }
     finally:
         try:
@@ -610,6 +679,61 @@ def run_selenium_for_property(property_no: int, village_index: int):
             shutil.rmtree(profile_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+def _pager_info_from_text(text: str) -> tuple[int | None, int | None]:
+    """
+    Parse grid / pager markup. Returns (total_pages_from_label, max_page_button_number).
+    Label (e.g. Page 2 of 7) is authoritative; page links are merged upward over responses.
+    """
+    if not text:
+        return None, None
+    label_tot = None
+    for pat in (
+        r"Page\s*(\d+)\s+of\s+(\d+)",
+        r"page\s*(\d+)\s*/\s*(\d+)",
+        r"(\d+)\s*-\s*\d+\s+of\s+(\d+)",
+    ):
+        m = re.search(pat, text, re.I)
+        if m:
+            try:
+                cur, tot = int(m.group(1)), int(m.group(2))
+                if 1 <= tot <= 5000 and 1 <= cur <= tot:
+                    label_tot = tot
+                    break
+            except ValueError:
+                pass
+    link_nums = []
+    for m in re.finditer(
+        r"RegistrationGrid['\"]\s*,\s*['\"]Page\$([0-9]+)",
+        text,
+        re.I,
+    ):
+        link_nums.append(int(m.group(1)))
+    for m in re.finditer(r"['\"]Page\$([0-9]+)['\"]", text):
+        link_nums.append(int(m.group(1)))
+    for m in re.finditer(r"Page%24(\d+)", text, re.I):
+        link_nums.append(int(m.group(1)))
+    link_max = max(link_nums) if link_nums else None
+    if link_max is not None and (link_max < 1 or link_max > 5000):
+        link_max = None
+    return label_tot, link_max
+
+
+def _read_pager_state_from_registration_grid(driver) -> tuple[int | None, bool]:
+    """
+    After search results load, read page count from grid / pager.
+    Returns (total_pages, is_exact). is_exact True when 'Page X of Y' (or similar) was found.
+    """
+    try:
+        grid = driver.find_element(By.ID, "RegistrationGrid")
+        blob = (grid.get_attribute("outerHTML") or "") + "\n" + (grid.text or "")
+        label_tot, link_max = _pager_info_from_text(blob)
+        if label_tot is not None:
+            return label_tot, True
+        return link_max, False
+    except Exception:
+        return None, False
 
 
 def _extract_hidden_fields_from_msajax_delta(delta_text: str):
@@ -709,6 +833,8 @@ def _get_selenium_state_with_retries(property_no: int, village_index: int, conte
                     f"attempt={attempt}/{PROPERTY_RETRY_MAX}, batch={batch}/{SELENIUM_BATCH_MAX}"
                 )
                 return run_selenium_for_property(property_no, village_index)
+            except NoRegistrationRecordsError:
+                raise
             except Exception as e:
                 last_exc = e
                 print(
@@ -768,6 +894,28 @@ def process_property(property_no: int, village_index: int):
         "__EVENTVALIDATION": state["eventvalidation"],
     }
 
+    pager_hard_cap = bool(state.get("pager_total_pages_is_exact"))
+    total_pages_cap = state.get("pager_total_pages")
+
+    def _maybe_update_total_pages_cap(txt: str):
+        nonlocal total_pages_cap, pager_hard_cap
+        label_tot, link_max = _pager_info_from_text(txt or "")
+        if label_tot is not None:
+            if total_pages_cap != label_tot or not pager_hard_cap:
+                print(f"[PAGER] total pages={label_tot} (Page X of Y in response)")
+            total_pages_cap = label_tot
+            pager_hard_cap = True
+            return
+        if link_max is None:
+            return
+        if total_pages_cap is None:
+            total_pages_cap = link_max
+            print(f"[PAGER] pager links up to {link_max} (updates as we load more pages)")
+            return
+        if link_max > total_pages_cap:
+            print(f"[PAGER] max page link {total_pages_cap} → {link_max}")
+            total_pages_cap = link_max
+
     def _build_page_milestones(target_page: int):
         """
         Replay checkpoints in this order:
@@ -816,6 +964,7 @@ def process_property(property_no: int, village_index: int):
         hidden_state["__VIEWSTATE"] = page_updates_local.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
         hidden_state["__VIEWSTATEGENERATOR"] = page_updates_local.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
         hidden_state["__EVENTVALIDATION"] = page_updates_local.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
+        _maybe_update_total_pages_cap(response_page_local.text)
         return True, "ok"
 
     def _recover_and_load_page(target_page: int):
@@ -857,7 +1006,16 @@ def process_property(property_no: int, village_index: int):
 
     page_no = 1
     while True:
-        print(f"[PAGE] property={property_no}, page={page_no}")
+        if pager_hard_cap and total_pages_cap is not None and page_no > total_pages_cap:
+            print(
+                f"[PAGE END] property={property_no}, past last page "
+                f"({total_pages_cap} from pager)"
+            )
+            break
+
+        cap_disp = str(total_pages_cap) if total_pages_cap is not None else "?"
+        cap_note = " [exact total]" if pager_hard_cap and total_pages_cap else ""
+        print(f"[PAGE] property={property_no}, page={page_no}/{cap_disp}{cap_note}")
         index_had_activity = False
 
         for index_no in range(10):
@@ -871,6 +1029,8 @@ def process_property(property_no: int, village_index: int):
             )
             print(f"STATUS(index {index_no}):", response_index.status_code)
             print((response_index.text or "")[:500])
+
+            _maybe_update_total_pages_cap(response_index.text)
 
             if _is_terminal_page_response(response_index.text):
                 print(f"[INDEX STOP] property={property_no}, page={page_no}, index={index_no} -> terminal response")
@@ -915,6 +1075,14 @@ def process_property(property_no: int, village_index: int):
             index_had_activity = True
 
         next_page = page_no + 1
+
+        if pager_hard_cap and total_pages_cap is not None and next_page > total_pages_cap:
+            print(
+                f"[PAGE END] property={property_no}, completed {total_pages_cap} page(s) "
+                f"(pager total — not requesting page {next_page})"
+            )
+            break
+
         # At 11, 21, 31... refresh browser/session to avoid session drops.
         if next_page > 1 and (next_page % 10 == 1):
             print(f"[SESSION REFRESH] property={property_no}, target_page={next_page}")
@@ -1073,6 +1241,12 @@ def main():
             try:
                 print(f"[PROPERTY START] property={property_no}, village_index={village_index}")
                 process_property(property_no, village_index)
+            except NoRegistrationRecordsError as e:
+                print(
+                    f"[NO RECORDS — NEXT PROPERTY] property={property_no}, "
+                    f"village_index={village_index}: {e}"
+                )
+                continue
             except Exception as e:
                 print(f"[PROPERTY SKIP] property={property_no}, village_index={village_index} failed: {e}")
                 continue
