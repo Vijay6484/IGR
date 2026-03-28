@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sys
@@ -354,46 +355,14 @@ def _any_visible_error_text(driver):
     return None
 
 
-def _registration_grid_has_result_rows(driver) -> bool:
-    """
-    True only if RegistrationGrid shows actionable result rows (not just an empty shell).
-    Aligns with postbacks like indexII$0 used later over HTTP.
-    """
-    try:
-        grid = driver.find_element(By.ID, "RegistrationGrid")
-        if not grid.is_displayed():
-            return False
-        blob = (grid.text or "").strip().lower()
-        if blob and any(p in blob for p in _NO_RECORD_LABEL_PHRASES):
-            return False
-        for a in grid.find_elements(By.TAG_NAME, "a"):
-            try:
-                href = (a.get_attribute("href") or "")
-                hl = href.lower()
-                if "indexii" in hl:
-                    return True
-                if "__dopostback" in hl and "registrationgrid" in hl:
-                    return True
-            except StaleElementReferenceException:
-                return False
-        tds = grid.find_elements(By.CSS_SELECTOR, "tbody tr td")
-        if len(tds) >= 2:
-            return True
-        tds = grid.find_elements(By.CSS_SELECTOR, "tr td")
-        return len(tds) >= 3
-    except Exception:
-        return False
-
-
 def _wait_for_search_outcome(driver, timeout=120):
     _wait_for_aspnet_ajax_idle(driver, timeout=min(60, max(15, timeout // 2)))
     start = time.time()
     time.sleep(0.35)
     while True:
-        # Prefer detecting real grid rows first (lblMsg can fill before/without the grid).
         try:
             grid = driver.find_element(By.ID, "RegistrationGrid")
-            if grid and grid.is_displayed() and _registration_grid_has_result_rows(driver):
+            if grid and grid.is_displayed():
                 return ("success", None)
         except Exception:
             pass
@@ -415,14 +384,129 @@ def _wait_for_search_outcome(driver, timeout=120):
             return ("error", msg)
 
         if time.time() - start > timeout:
-            try:
-                grid = driver.find_element(By.ID, "RegistrationGrid")
-                if grid and grid.is_displayed() and not _registration_grid_has_result_rows(driver):
-                    return ("no_records", "registration grid visible but no data rows")
-            except Exception:
-                pass
             return ("timeout", None)
         time.sleep(0.25)
+
+
+def _selenium_has_any_registration_records(driver) -> bool:
+    """True if the grid exposes index-II links (scrapable rows). Uses Selenium only."""
+    try:
+        msg_el = driver.find_element(By.ID, "lblMsgCTS1")
+        if msg_el.is_displayed():
+            t = (msg_el.text or "").strip().lower()
+            if t and any(p in t for p in _NO_RECORD_LABEL_PHRASES):
+                return False
+    except Exception:
+        pass
+    try:
+        html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+        h = html.lower()
+        return "indexii" in h or "indexii$" in h
+    except Exception:
+        return False
+
+
+def _pager_shows_page_one(html: str) -> bool:
+    if re.search(r"Page\s*1\s+of\s+\d+", html or "", re.I):
+        return True
+    m = re.search(r"Page\s*(\d+)\s+of\s+\d+", html or "", re.I)
+    return bool(m and int(m.group(1)) == 1)
+
+
+def _click_pager_first_or_prev(driver) -> bool:
+    """Try First / « / Prev style pager links inside RegistrationGrid (go toward page 1)."""
+    try:
+        return bool(
+            driver.execute_script(
+                """
+                var g = document.getElementById('RegistrationGrid');
+                if (!g) return false;
+                var links = g.querySelectorAll('a[href]');
+                var tryTexts = ['first', '<<', '«', '<', 'prev', 'previous', 'back'];
+                for (var i = 0; i < links.length; i++) {
+                    var a = links[i];
+                    var t = (a.textContent || '').trim().toLowerCase();
+                    var h = (a.getAttribute('href') || '').toLowerCase();
+                    for (var j = 0; j < tryTexts.length; j++) {
+                        if (t === tryTexts[j] || t.indexOf(tryTexts[j]) === 0) {
+                            a.click();
+                            return true;
+                        }
+                    }
+                    if (h.indexOf('first') >= 0 || h.indexOf('prev') >= 0) {
+                        a.click();
+                        return true;
+                    }
+                }
+                return false;
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def _selenium_ensure_grid_on_page_one(driver, max_rounds: int = 80, total_pages: int | None = None) -> None:
+    """After pager exploration, return the grid to page 1 so ViewState matches HTTP start."""
+    if total_pages == 1:
+        print("[PAGER] total_pages=1 — already on the only page; skipping return-to-page-one")
+        return
+    for r in range(1, max_rounds + 1):
+        _wait_for_aspnet_ajax_idle(driver, timeout=35)
+        try:
+            html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+        except Exception:
+            raise RuntimeError("RegistrationGrid missing while returning to page 1")
+        if _pager_shows_page_one(html):
+            return
+        if _pagination_probe_click_page_postback(driver, 1):
+            time.sleep(0.2)
+            continue
+        if _click_pager_first_or_prev(driver):
+            time.sleep(0.2)
+            continue
+        print(f"[PAGER] warn: could not move toward page 1 (round {r}/{max_rounds})")
+        time.sleep(0.35)
+    raise RuntimeError(
+        "Could not return RegistrationGrid to page 1 after counting pages; "
+        "try headed browser or increase max_rounds."
+    )
+
+
+def _selenium_count_total_pages_via_ellipsis(driver) -> int:
+    """
+    Walk pager using '...' / ellipsis until no more, tracking the highest page number seen.
+    Also considers Page X of Y and all visible Page$N links in each view.
+    """
+    max_n = 1
+    for sweep in range(1, 200):
+        _wait_for_aspnet_ajax_idle(driver, timeout=45)
+        try:
+            html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+        except Exception:
+            break
+        label_tot, link_max = _pager_info_from_text(html)
+        if link_max:
+            max_n = max(max_n, link_max)
+        if label_tot:
+            max_n = max(max_n, label_tot)
+        if _pagination_probe_click_ellipsis_in_grid(driver):
+            time.sleep(0.25)
+            continue
+        break
+    _wait_for_aspnet_ajax_idle(driver, timeout=35)
+    try:
+        html = driver.find_element(By.ID, "RegistrationGrid").get_attribute("outerHTML") or ""
+        label_tot, link_max = _pager_info_from_text(html)
+        if link_max:
+            max_n = max(max_n, link_max)
+        if label_tot:
+            max_n = max(max_n, label_tot)
+    except Exception:
+        pass
+    total = max(max_n, 1)
+    print(f"[PAGER] Selenium counted total_pages={total} (ellipsis walk + pager markup)")
+    return total
 
 
 def _wait_hidden_fields_ready(driver, prev_viewstate="", timeout=30):
@@ -507,7 +591,183 @@ def _cleanup_stale_chrome_profiles():
         pass
 
 
-def run_selenium_for_property(property_no: int, village_index: int):
+def _save_pagination_probe_snapshot(driver, tag: str, out_dir: str) -> None:
+    """
+    Write RegistrationGrid outer HTML + structured pager/ellipsis/link summary for analysis.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    safe = re.sub(r"[^\w.\-]+", "_", tag).strip("_") or "snap"
+    prefix = os.path.join(out_dir, safe)
+
+    try:
+        grid = driver.find_element(By.ID, "RegistrationGrid")
+        html = grid.get_attribute("outerHTML") or ""
+    except Exception as e:
+        html = f"<!-- RegistrationGrid missing: {e} -->\n"
+
+    with open(prefix + "_RegistrationGrid_outer.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+    summary = None
+    try:
+        summary = driver.execute_script(
+            """
+            var g = document.getElementById('RegistrationGrid');
+            if (!g) return {error: 'RegistrationGrid not found'};
+            function norm(s) { return (s || '').trim().replace(/\\s+/g, ' '); }
+            var links = [];
+            var all = g.querySelectorAll('a');
+            for (var i = 0; i < all.length; i++) {
+                var a = all[i];
+                var t = norm(a.textContent);
+                var href = a.getAttribute('href') || '';
+                if (!t && href.indexOf('doPostBack') < 0 && href.indexOf('Page') < 0) continue;
+                links.push({
+                    index: i,
+                    text: t,
+                    href: href.slice(0, 900),
+                    displayed: a.offsetParent !== null
+                });
+            }
+            var ell = [];
+            var nodes = g.querySelectorAll('tr td, tr th, a, span, label');
+            for (var j = 0; j < nodes.length; j++) {
+                var el = nodes[j];
+                var tx = norm(el.textContent);
+                if (tx === '...' || tx === '…' || (tx.length >= 1 && tx.length <= 4 && /^[.…]+$/.test(tx))) {
+                    ell.push({
+                        tag: el.tagName,
+                        text: tx,
+                        htmlFragment: (el.outerHTML || '').slice(0, 500)
+                    });
+                }
+            }
+            var tables = g.querySelectorAll('table');
+            var pagerish = [];
+            for (var k = 0; k < tables.length; k++) {
+                var tbl = tables[k];
+                var cls = (tbl.className || '') + '';
+                var ot = (tbl.outerHTML || '');
+                if (cls.toLowerCase().indexOf('pager') >= 0 ||
+                    ot.indexOf('Page$') >= 0 || ot.indexOf('Page%24') >= 0 ||
+                    ot.indexOf('...') >= 0 || ot.indexOf('hellip') >= 0) {
+                    pagerish.push({
+                        className: cls,
+                        outerHTML: ot.slice(0, 8000)
+                    });
+                }
+            }
+            return {
+                linkCount: links.length,
+                links: links,
+                ellipsisLikeCells: ell.slice(0, 50),
+                tablesThatLookLikePager: pagerish.slice(0, 5),
+                gridTextHead: norm(g.innerText).slice(0, 3000)
+            };
+            """
+        )
+    except Exception as e:
+        summary = {"error": str(e)}
+
+    with open(prefix + "_pagination_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+
+    # Human-readable link list
+    try:
+        lines = [f"# {tag}\n"]
+        if isinstance(summary, dict) and "links" in summary:
+            for L in summary["links"]:
+                lines.append(f"- text={L.get('text')!r} displayed={L.get('displayed')} href={L.get('href', '')[:200]!r}...\n")
+        with open(prefix + "_pagination_links.txt", "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except Exception:
+        pass
+
+    print(f"[PAGINATION PROBE] wrote {prefix}_* under {out_dir}")
+
+
+def _pagination_probe_click_ellipsis_in_grid(driver) -> bool:
+    """Click first '...' / ellipsis pager control inside RegistrationGrid (next batch of ~10 pages)."""
+    try:
+        clicked = driver.execute_script(
+            """
+            var g = document.getElementById('RegistrationGrid');
+            if (!g) return false;
+            var all = g.querySelectorAll('a');
+            for (var i = 0; i < all.length; i++) {
+                var a = all[i];
+                var t = (a.textContent || '').trim();
+                if (t === '...' || t === '…' || (t.length >= 1 && t.length <= 4 && /^[.…]+$/.test(t))) {
+                    a.click();
+                    return true;
+                }
+            }
+            return false;
+            """
+        )
+        return bool(clicked)
+    except Exception:
+        return False
+
+
+def _pagination_probe_click_page_postback(driver, page_num: int) -> bool:
+    """Click a pager link whose href contains Page$<page_num> (ASP.NET GridView style)."""
+    try:
+        clicked = driver.execute_script(
+            """
+            var n = arguments[0];
+            var needle = 'Page$' + n;
+            var enc = 'Page%24' + n;
+            var g = document.getElementById('RegistrationGrid');
+            if (!g) return false;
+            var links = g.querySelectorAll('a[href]');
+            for (var i = 0; i < links.length; i++) {
+                var h = links[i].getAttribute('href') || '';
+                if (h.indexOf(needle) >= 0 || h.indexOf(enc) >= 0) {
+                    links[i].click();
+                    return true;
+                }
+            }
+            return false;
+            """,
+            int(page_num),
+        )
+        return bool(clicked)
+    except Exception:
+        return False
+
+
+def _run_pagination_probe_sequence(driver, out_dir: str) -> None:
+    """
+    Capture how pagination is rendered (including ellipsis batches ~every 10 pages).
+    """
+    print("[PAGINATION PROBE] capturing initial grid / pager HTML…")
+    _save_pagination_probe_snapshot(driver, "01_after_search", out_dir)
+
+    if _pagination_probe_click_ellipsis_in_grid(driver):
+        print("[PAGINATION PROBE] clicked ellipsis (…); waiting for AJAX…")
+        _wait_for_aspnet_ajax_idle(driver, timeout=50)
+        time.sleep(0.35)
+        _save_pagination_probe_snapshot(driver, "02_after_ellipsis_click", out_dir)
+    else:
+        print("[PAGINATION PROBE] no ellipsis link found in grid (maybe ≤10 pages or different markup)")
+
+    if _pagination_probe_click_page_postback(driver, 11):
+        print("[PAGINATION PROBE] clicked Page$11; waiting for AJAX…")
+        _wait_for_aspnet_ajax_idle(driver, timeout=50)
+        time.sleep(0.35)
+        _save_pagination_probe_snapshot(driver, "03_after_Page_11_click", out_dir)
+    else:
+        print("[PAGINATION PROBE] no Page$11 link in grid (fewer than 11 pages or ellipsis-only navigation)")
+
+    if _pagination_probe_click_ellipsis_in_grid(driver):
+        print("[PAGINATION PROBE] clicked second ellipsis; waiting for AJAX…")
+        _wait_for_aspnet_ajax_idle(driver, timeout=50)
+        time.sleep(0.35)
+        _save_pagination_probe_snapshot(driver, "04_after_second_ellipsis_click", out_dir)
+
+
+def run_selenium_for_property(property_no: int, village_index: int, pagination_probe_out_dir: str | None = None):
     _cleanup_stale_chrome_profiles()
     profile_dir = tempfile.mkdtemp(prefix="igr_chrome_profile_")
     driver = None
@@ -626,7 +886,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
         status, message = _wait_for_search_outcome(driver, timeout=120)
 
         if status == "success":
-            print("✅ Search completed — registration rows present")
+            print("✅ Search completed — results grid visible")
         elif status == "no_records":
             raise NoRegistrationRecordsError(message or "no registration rows for this property")
         elif status == "message":
@@ -639,12 +899,12 @@ def run_selenium_for_property(property_no: int, village_index: int):
 
         _wait_hidden_fields_ready(driver, prev_viewstate=pre_submit_viewstate, timeout=30)
 
-        pager_total_pages, pager_total_pages_is_exact = _read_pager_state_from_registration_grid(driver)
-        if pager_total_pages is not None:
-            print(
-                f"[PAGER] UI: {pager_total_pages} page(s)"
-                f"{' (exact — Page X of Y)' if pager_total_pages_is_exact else ' (from pager links; may increase)'}",
-            )
+        if not _selenium_has_any_registration_records(driver):
+            raise NoRegistrationRecordsError("no index-II rows in grid for this property")
+
+        total_pages = _selenium_count_total_pages_via_ellipsis(driver)
+        _selenium_ensure_grid_on_page_one(driver, total_pages=total_pages)
+        _wait_hidden_fields_ready(driver, prev_viewstate="", timeout=35)
 
         _, viewstate = _field(driver, "__VIEWSTATE")
         _, eventvalidation = _field(driver, "__EVENTVALIDATION")
@@ -652,6 +912,12 @@ def run_selenium_for_property(property_no: int, village_index: int):
         cookies = driver.get_cookies()
 
         print("✅ State + cookies ready")
+
+        if pagination_probe_out_dir:
+            try:
+                _run_pagination_probe_sequence(driver, pagination_probe_out_dir)
+            except Exception as e:
+                print(f"[PAGINATION PROBE] sequence error (partial files may exist): {e}")
 
         return {
             "year_used": year_used,
@@ -666,8 +932,7 @@ def run_selenium_for_property(property_no: int, village_index: int):
             "viewstate_gen": viewstate_gen,
             "eventvalidation": eventvalidation,
             "cookies": cookies,
-            "pager_total_pages": pager_total_pages,
-            "pager_total_pages_is_exact": pager_total_pages_is_exact,
+            "total_pages": total_pages,
         }
     finally:
         try:
@@ -718,22 +983,6 @@ def _pager_info_from_text(text: str) -> tuple[int | None, int | None]:
     if link_max is not None and (link_max < 1 or link_max > 5000):
         link_max = None
     return label_tot, link_max
-
-
-def _read_pager_state_from_registration_grid(driver) -> tuple[int | None, bool]:
-    """
-    After search results load, read page count from grid / pager.
-    Returns (total_pages, is_exact). is_exact True when 'Page X of Y' (or similar) was found.
-    """
-    try:
-        grid = driver.find_element(By.ID, "RegistrationGrid")
-        blob = (grid.get_attribute("outerHTML") or "") + "\n" + (grid.text or "")
-        label_tot, link_max = _pager_info_from_text(blob)
-        if label_tot is not None:
-            return label_tot, True
-        return link_max, False
-    except Exception:
-        return None, False
 
 
 def _extract_hidden_fields_from_msajax_delta(delta_text: str):
@@ -894,27 +1143,14 @@ def process_property(property_no: int, village_index: int):
         "__EVENTVALIDATION": state["eventvalidation"],
     }
 
-    pager_hard_cap = bool(state.get("pager_total_pages_is_exact"))
-    total_pages_cap = state.get("pager_total_pages")
+    total_pages_cap = state.get("total_pages")
 
-    def _maybe_update_total_pages_cap(txt: str):
-        nonlocal total_pages_cap, pager_hard_cap
-        label_tot, link_max = _pager_info_from_text(txt or "")
-        if label_tot is not None:
-            if total_pages_cap != label_tot or not pager_hard_cap:
-                print(f"[PAGER] total pages={label_tot} (Page X of Y in response)")
-            total_pages_cap = label_tot
-            pager_hard_cap = True
-            return
-        if link_max is None:
-            return
-        if total_pages_cap is None:
-            total_pages_cap = link_max
-            print(f"[PAGER] pager links up to {link_max} (updates as we load more pages)")
-            return
-        if link_max > total_pages_cap:
-            print(f"[PAGER] max page link {total_pages_cap} → {link_max}")
-            total_pages_cap = link_max
+    def _sync_total_pages_from_state():
+        nonlocal total_pages_cap
+        total_pages_cap = state.get("total_pages", total_pages_cap)
+
+    if total_pages_cap is not None:
+        print(f"[PAGER] HTTP will stop after page {total_pages_cap} (from Selenium for this property)")
 
     def _build_page_milestones(target_page: int):
         """
@@ -964,7 +1200,6 @@ def process_property(property_no: int, village_index: int):
         hidden_state["__VIEWSTATE"] = page_updates_local.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
         hidden_state["__VIEWSTATEGENERATOR"] = page_updates_local.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
         hidden_state["__EVENTVALIDATION"] = page_updates_local.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
-        _maybe_update_total_pages_cap(response_page_local.text)
         return True, "ok"
 
     def _recover_and_load_page(target_page: int):
@@ -990,6 +1225,7 @@ def process_property(property_no: int, village_index: int):
                 "__VIEWSTATEGENERATOR": refresh_state["viewstate_gen"],
                 "__EVENTVALIDATION": refresh_state["eventvalidation"],
             }
+            _sync_total_pages_from_state()
 
             milestones = _build_page_milestones(target_page)
 
@@ -1006,16 +1242,14 @@ def process_property(property_no: int, village_index: int):
 
     page_no = 1
     while True:
-        if pager_hard_cap and total_pages_cap is not None and page_no > total_pages_cap:
+        if total_pages_cap is not None and page_no > total_pages_cap:
             print(
-                f"[PAGE END] property={property_no}, past last page "
-                f"({total_pages_cap} from pager)"
+                f"[PAGE END] property={property_no}, past last page ({total_pages_cap} from Selenium)"
             )
             break
 
         cap_disp = str(total_pages_cap) if total_pages_cap is not None else "?"
-        cap_note = " [exact total]" if pager_hard_cap and total_pages_cap else ""
-        print(f"[PAGE] property={property_no}, page={page_no}/{cap_disp}{cap_note}")
+        print(f"[PAGE] property={property_no}, page={page_no}/{cap_disp}")
         index_had_activity = False
 
         for index_no in range(10):
@@ -1029,8 +1263,6 @@ def process_property(property_no: int, village_index: int):
             )
             print(f"STATUS(index {index_no}):", response_index.status_code)
             print((response_index.text or "")[:500])
-
-            _maybe_update_total_pages_cap(response_index.text)
 
             if _is_terminal_page_response(response_index.text):
                 print(f"[INDEX STOP] property={property_no}, page={page_no}, index={index_no} -> terminal response")
@@ -1076,10 +1308,10 @@ def process_property(property_no: int, village_index: int):
 
         next_page = page_no + 1
 
-        if pager_hard_cap and total_pages_cap is not None and next_page > total_pages_cap:
+        if total_pages_cap is not None and next_page > total_pages_cap:
             print(
                 f"[PAGE END] property={property_no}, completed {total_pages_cap} page(s) "
-                f"(pager total — not requesting page {next_page})"
+                f"(Selenium total — not requesting page {next_page})"
             )
             break
 
@@ -1096,6 +1328,7 @@ def process_property(property_no: int, village_index: int):
                 "__VIEWSTATEGENERATOR": refresh_state["viewstate_gen"],
                 "__EVENTVALIDATION": refresh_state["eventvalidation"],
             }
+            _sync_total_pages_from_state()
 
             # Rebuild page state in steps: 11, 21, 31 ... up to target page.
             milestones = _build_page_milestones(next_page)
