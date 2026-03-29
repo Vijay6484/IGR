@@ -45,7 +45,11 @@ _NO_RECORD_LABEL_PHRASES = (
 # ==============================
 URL = "https://freesearchigrservice.maharashtra.gov.in/"
 CAPTCHA_API_KEY = "CAP-03DD9281E150148DCB0705A6F665CF337303C5FDC399749D977BEAC6CD398191"
-REPORT_URL = "https://freesearchigrservice.maharashtra.gov.in/isaritaHTMLReportSuchiKramank2_RegLive.aspx"
+# Report GET after indexII POST: 1985–2018 use legacy page; 2019+ use RegLive Suchi Kramank.
+REPORT_URL_HTML_LEGACY = "https://freesearchigrservice.maharashtra.gov.in/HtmlReport.aspx"
+REPORT_URL_REG_LIVE = (
+    "https://freesearchigrservice.maharashtra.gov.in/isaritaHTMLReportSuchiKramank2_RegLive.aspx"
+)
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
@@ -926,6 +930,27 @@ def _report_get_http_should_post_retry(resp) -> bool:
     return sc is not None and sc >= 500
 
 
+def _report_get_url_for_year(year_val) -> str:
+    """
+    Years before 2019 (site archive 1985 onward): GET HtmlReport.aspx.
+    2019 and later: GET isaritaHTMLReportSuchiKramank2_RegLive.aspx.
+    """
+    y = None
+    if year_val is not None:
+        s = str(year_val).strip()
+        m = re.search(r"(19|20)\d{2}", s)
+        if m:
+            y = int(m.group(0))
+        else:
+            try:
+                y = int(float(s))
+            except ValueError:
+                pass
+    if y is not None and y < 2019:
+        return REPORT_URL_HTML_LEGACY
+    return REPORT_URL_REG_LIVE
+
+
 def _build_common_payload(state: dict, property_no: int, hidden_state: dict) -> dict:
     return {
         "ScriptManager1": "upRegistrationGrid|RegistrationGrid",
@@ -1053,6 +1078,10 @@ def process_property(property_no: int, village_index: int):
         "__VIEWSTATEGENERATOR": state["viewstate_gen"],
         "__EVENTVALIDATION": state["eventvalidation"],
     }
+    print(
+        f"[REPORT GET] year={state.get('year_used') or YEAR!r} -> "
+        f"{_report_get_url_for_year(state.get('year_used') or YEAR)}"
+    )
 
     def _build_page_milestones(target_page: int):
         """
@@ -1156,17 +1185,18 @@ def process_property(property_no: int, village_index: int):
                     time.sleep(post_get_delay_sec)
 
                 # One GET per POST cycle only; on failure the next iteration re-POSTs indexII (no GET-only retries).
+                report_get_url = _report_get_url_for_year(state.get("year_used") or YEAR)
                 response_doc = None
                 try:
                     response_doc = _request_with_retry(
-                        lambda: session.get(
-                            REPORT_URL,
+                        lambda u=report_get_url: session.get(
+                            u,
                             headers={"User-Agent": "Mozilla/5.0", "Referer": URL},
                         ),
                         label=(
                             f"report_get property={property_no} page={page_no} "
                             f"index={index_no} post_get_delay={post_get_delay_sec}s "
-                            f"try={index_try}/{INDEX_POST_TO_GET_MAX_ATTEMPTS}"
+                            f"try={index_try}/{INDEX_POST_TO_GET_MAX_ATTEMPTS} url={report_get_url!r}"
                         ),
                         max_retries=1,
                     )
