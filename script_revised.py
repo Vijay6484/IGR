@@ -71,8 +71,9 @@ PROPERTY_RETRY_MAX = 3
 SELENIUM_BATCH_MAX = 4
 HTTP_RETRY_MAX = 4
 HTTP_RETRY_SLEEP_SEC = 2.0
-# Report download: only GET retries (never re-POST indexII). 1 initial + 3 retries = 4 attempts.
-REPORT_GET_MAX_ATTEMPTS = 4
+# Report: after each indexII POST, wait post_get_delay_sec before GET; on empty/no-data HTML,
+# re-POST same index and increase delay by 1s (max attempts caps total tries).
+INDEX_POST_TO_GET_MAX_ATTEMPTS = 8
 REPORT_GET_RETRY_SLEEP_SEC = 0.35
 
 
@@ -885,6 +886,8 @@ def _is_no_data_report_html(text: str) -> bool:
     if not text:
         return False
     t = re.sub(r"\s+", " ", (text or "").lower())
+    if "no data" in t and "loaded" in t:
+        return True
     if "no data found" not in t:
         return False
     if "document" in t and "database" in t:
@@ -896,8 +899,8 @@ def _is_no_data_report_html(text: str) -> bool:
 
 def _report_get_should_retry(text: str | None, raw_len: int) -> bool:
     """
-    True → repeat GET to REPORT_URL only (do not re-post indexII).
-    Covers empty/0-byte body, no-data message, and empty report shell HTML.
+    True → report HTML not ready yet: next attempt must indexII POST again, then GET
+    (never rely on repeating GET alone). Covers empty body, no-data shell, etc.
     """
     text = text or ""
     if raw_len == 0:
@@ -913,6 +916,14 @@ def _report_get_should_retry(text: str | None, raw_len: int) -> bool:
     if "__VIEWSTATE" in text and _report_visible_text_len(text) < 30:
         return True
     return False
+
+
+def _report_get_http_should_post_retry(resp) -> bool:
+    """5xx / missing response → redo index POST then GET; do not chain multiple GETs."""
+    if resp is None:
+        return True
+    sc = getattr(resp, "status_code", None)
+    return sc is not None and sc >= 500
 
 
 def _build_common_payload(state: dict, property_no: int, hidden_state: dict) -> dict:
@@ -1104,63 +1115,86 @@ def process_property(property_no: int, village_index: int):
         index_had_activity = False
 
         for index_no in range(10):
-            payload_index = _build_common_payload(state, property_no, hidden_state)
-            payload_index["__EVENTTARGET"] = "RegistrationGrid"
-            payload_index["__EVENTARGUMENT"] = f"indexII${index_no}"
-
-            response_index = _request_with_retry(
-                lambda: session.post(URL, data=payload_index, headers=headers),
-                label=f"index_post property={property_no} page={page_no} index={index_no}",
-            )
-            print(f"STATUS(index {index_no}):", response_index.status_code)
-            print((response_index.text or "")[:500])
-
-            if _is_terminal_page_response(response_index.text):
-                print(
-                    f"[INDEX UNAVAILABLE] property={property_no}, page={page_no}, index={index_no} "
-                    f"-> 0|error|500|| (document not available for this index) — next property"
-                )
-                raise IndexDocumentUnavailableError(
-                    f"property={property_no} page={page_no} index={index_no}: indexII returned 0|error|500||"
-                )
-
-            idx_updates = _extract_hidden_fields_from_msajax_delta(response_index.text)
-            if idx_updates:
-                hidden_state["__VIEWSTATE"] = idx_updates.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
-                hidden_state["__VIEWSTATEGENERATOR"] = idx_updates.get("__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"])
-                hidden_state["__EVENTVALIDATION"] = idx_updates.get("__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"])
-
+            post_get_delay_sec = 0.0
             response_doc = None
-            for get_try in range(1, REPORT_GET_MAX_ATTEMPTS + 1):
-                response_doc = _request_with_retry(
-                    lambda: session.get(
-                        REPORT_URL,
-                        headers={"User-Agent": "Mozilla/5.0", "Referer": URL},
-                    ),
+            for index_try in range(1, INDEX_POST_TO_GET_MAX_ATTEMPTS + 1):
+                payload_index = _build_common_payload(state, property_no, hidden_state)
+                payload_index["__EVENTTARGET"] = "RegistrationGrid"
+                payload_index["__EVENTARGUMENT"] = f"indexII${index_no}"
+
+                response_index = _request_with_retry(
+                    lambda p=payload_index: session.post(URL, data=p, headers=headers),
                     label=(
-                        f"report_get property={property_no} page={page_no} "
-                        f"index={index_no} get={get_try}/{REPORT_GET_MAX_ATTEMPTS}"
+                        f"index_post property={property_no} page={page_no} index={index_no} "
+                        f"try={index_try}/{INDEX_POST_TO_GET_MAX_ATTEMPTS}"
                     ),
                 )
+                print(f"STATUS(index {index_no}):", response_index.status_code)
+                print((response_index.text or "")[:500])
+
+                if _is_terminal_page_response(response_index.text):
+                    print(
+                        f"[INDEX UNAVAILABLE] property={property_no}, page={page_no}, index={index_no} "
+                        f"-> 0|error|500|| (document not available for this index) — next property"
+                    )
+                    raise IndexDocumentUnavailableError(
+                        f"property={property_no} page={page_no} index={index_no}: indexII returned 0|error|500||"
+                    )
+
+                idx_updates = _extract_hidden_fields_from_msajax_delta(response_index.text)
+                if idx_updates:
+                    hidden_state["__VIEWSTATE"] = idx_updates.get("__VIEWSTATE", hidden_state["__VIEWSTATE"])
+                    hidden_state["__VIEWSTATEGENERATOR"] = idx_updates.get(
+                        "__VIEWSTATEGENERATOR", hidden_state["__VIEWSTATEGENERATOR"]
+                    )
+                    hidden_state["__EVENTVALIDATION"] = idx_updates.get(
+                        "__EVENTVALIDATION", hidden_state["__EVENTVALIDATION"]
+                    )
+
+                # Index POST response is fully received; only then wait and GET the report.
+                if post_get_delay_sec > 0:
+                    time.sleep(post_get_delay_sec)
+
+                # One GET per POST cycle only; on failure the next iteration re-POSTs indexII (no GET-only retries).
+                response_doc = None
+                try:
+                    response_doc = _request_with_retry(
+                        lambda: session.get(
+                            REPORT_URL,
+                            headers={"User-Agent": "Mozilla/5.0", "Referer": URL},
+                        ),
+                        label=(
+                            f"report_get property={property_no} page={page_no} "
+                            f"index={index_no} post_get_delay={post_get_delay_sec}s "
+                            f"try={index_try}/{INDEX_POST_TO_GET_MAX_ATTEMPTS}"
+                        ),
+                        max_retries=1,
+                    )
+                except requests.RequestException as e:
+                    print(
+                        f"[REPORT GET ERROR] property={property_no} page={page_no} index={index_no}: {e} "
+                        f"— will re-POST indexII then GET"
+                    )
                 print("STATUS(report):", getattr(response_doc, "status_code", None))
 
                 body = (response_doc.text if response_doc else "") or ""
                 raw = response_doc.content if response_doc else b""
                 raw_len = len(raw) if raw is not None else 0
 
-                if not _report_get_should_retry(body, raw_len):
+                http_bad = _report_get_http_should_post_retry(response_doc)
+                content_bad = _report_get_should_retry(body, raw_len)
+                if not http_bad and not content_bad:
                     break
 
                 print(
-                    f"[REPORT GET RETRY] property={property_no} page={page_no} index={index_no} "
-                    f"GET {get_try}/{REPORT_GET_MAX_ATTEMPTS} (empty/no-data/shell — GET only, no index re-post)"
+                    f"[POST+GET RETRY] property={property_no} page={page_no} index={index_no} "
+                    f"after GET ({'HTTP' if http_bad else 'empty/no-data/shell'}) — "
+                    f"next: re-POST indexII, then wait {post_get_delay_sec + 1.0}s, then GET "
+                    f"(attempt {index_try}/{INDEX_POST_TO_GET_MAX_ATTEMPTS})"
                 )
-
-                if get_try < REPORT_GET_MAX_ATTEMPTS:
-                    if get_try == REPORT_GET_MAX_ATTEMPTS - 1:
-                        time.sleep(REPORT_GET_RETRY_SLEEP_SEC + 0.65)
-                    else:
-                        time.sleep(REPORT_GET_RETRY_SLEEP_SEC)
+                if index_try < INDEX_POST_TO_GET_MAX_ATTEMPTS:
+                    post_get_delay_sec += 1.0
+                    time.sleep(REPORT_GET_RETRY_SLEEP_SEC)
 
             _save_report_html(state, property_no, page_no, index_no, response_doc.text if response_doc else "")
             index_had_activity = True
