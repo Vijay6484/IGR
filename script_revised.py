@@ -955,7 +955,7 @@ def _report_get_url_for_year(year_val) -> str:
                 pass
     if y is None:
         return REPORT_URL_REG_LIVE
-    if y >= 2018:
+    if y >= 2013:
         return REPORT_URL_REG_LIVE
     if y >= 2002:
         return REPORT_URL_HTML_LEGACY
