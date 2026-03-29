@@ -47,12 +47,16 @@ URL = "https://freesearchigrservice.maharashtra.gov.in/"
 CAPTCHA_API_KEY = "CAP-03DD9281E150148DCB0705A6F665CF337303C5FDC399749D977BEAC6CD398191"
 # Report GET after indexII POST (by search year):
 #   <2002 (1985–2001) → Manual85HTMLReportSuchiKramank2.aspx
-#   2002–2017 → HtmlReport.aspx
-#   2018+ → isaritaHTMLReportSuchiKramank2_RegLive.aspx
+#   2002–2012 → HtmlReport.aspx
+#   2013–2018 → isaritaHTMLReportSuchiKramank2.aspx
+#   2019+ → isaritaHTMLReportSuchiKramank2_RegLive.aspx
 REPORT_URL_MANUAL85 = (
     "https://freesearchigrservice.maharashtra.gov.in/Manual85HTMLReportSuchiKramank2.aspx"
 )
 REPORT_URL_HTML_LEGACY = "https://freesearchigrservice.maharashtra.gov.in/HtmlReport.aspx"
+REPORT_URL_ISARITA_SUCHI = (
+    "https://freesearchigrservice.maharashtra.gov.in/isaritaHTMLReportSuchiKramank2.aspx"
+)
 REPORT_URL_REG_LIVE = (
     "https://freesearchigrservice.maharashtra.gov.in/isaritaHTMLReportSuchiKramank2_RegLive.aspx"
 )
@@ -938,9 +942,10 @@ def _report_get_http_should_post_retry(resp) -> bool:
 
 def _report_get_url_for_year(year_val) -> str:
     """
-    Before 2002 (down to 1985 archive): GET Manual85HTMLReportSuchiKramank2.aspx.
-    2002–2017 inclusive: GET HtmlReport.aspx (legacy).
-    2018 onwards: GET isaritaHTMLReportSuchiKramank2_RegLive.aspx.
+    Before 2002 (1985 archive band): GET Manual85HTMLReportSuchiKramank2.aspx.
+    2002–2012: GET HtmlReport.aspx (legacy).
+    2013–2018 inclusive: GET isaritaHTMLReportSuchiKramank2.aspx.
+    2019 onwards: GET isaritaHTMLReportSuchiKramank2_RegLive.aspx.
     """
     y = None
     if year_val is not None:
@@ -955,8 +960,10 @@ def _report_get_url_for_year(year_val) -> str:
                 pass
     if y is None:
         return REPORT_URL_REG_LIVE
-    if y >= 2013:
+    if y >= 2019:
         return REPORT_URL_REG_LIVE
+    if y >= 2013:
+        return REPORT_URL_ISARITA_SUCHI
     if y >= 2002:
         return REPORT_URL_HTML_LEGACY
     return REPORT_URL_MANUAL85
