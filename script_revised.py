@@ -45,7 +45,7 @@ _NO_RECORD_LABEL_PHRASES = (
 # ==============================
 URL = "https://freesearchigrservice.maharashtra.gov.in/"
 CAPTCHA_API_KEY = "CAP-03DD9281E150148DCB0705A6F665CF337303C5FDC399749D977BEAC6CD398191"
-# Report GET after indexII POST: 1985–2018 use legacy page; 2019+ use RegLive Suchi Kramank.
+# Report GET after indexII POST: 1985–2017 → HtmlReport.aspx; 2018+ → RegLive Suchi Kramank.
 REPORT_URL_HTML_LEGACY = "https://freesearchigrservice.maharashtra.gov.in/HtmlReport.aspx"
 REPORT_URL_REG_LIVE = (
     "https://freesearchigrservice.maharashtra.gov.in/isaritaHTMLReportSuchiKramank2_RegLive.aspx"
@@ -932,8 +932,8 @@ def _report_get_http_should_post_retry(resp) -> bool:
 
 def _report_get_url_for_year(year_val) -> str:
     """
-    Years before 2019 (site archive 1985 onward): GET HtmlReport.aspx.
-    2019 and later: GET isaritaHTMLReportSuchiKramank2_RegLive.aspx.
+    1985 through 2017: GET HtmlReport.aspx (legacy).
+    2018 onwards: GET isaritaHTMLReportSuchiKramank2_RegLive.aspx.
     """
     y = None
     if year_val is not None:
@@ -946,7 +946,7 @@ def _report_get_url_for_year(year_val) -> str:
                 y = int(float(s))
             except ValueError:
                 pass
-    if y is not None and y < 2019:
+    if y is not None and y < 2018:
         return REPORT_URL_HTML_LEGACY
     return REPORT_URL_REG_LIVE
 
