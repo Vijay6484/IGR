@@ -15,6 +15,7 @@ from selenium.common.exceptions import (
     TimeoutException,
     ElementNotInteractableException,
 )
+from local_captcha_solver import solve_captcha_with_tesseract_from_driver
 
 
 class NoRegistrationRecordsError(Exception):
@@ -152,6 +153,63 @@ def solve_captcha(driver):
         ).json()
         if res.get("status") == "ready":
             return res["solution"]["text"]
+
+
+def _captcha_new_image_ready(driver, old_src: str | None) -> bool:
+    try:
+        img = driver.find_element(By.ID, "imgCaptcha_new")
+        src = img.get_attribute("src") or ""
+        if not src:
+            return False
+        if old_src and src == old_src:
+            return False
+        natural_width = driver.execute_script("return arguments[0].naturalWidth;", img)
+        return natural_width and int(natural_width) > 0
+    except Exception:
+        return False
+
+
+def _force_new_captcha_image(driver, timeout=35) -> None:
+    """
+    Trigger the site to render a new captcha image by submitting a dummy value ("1"),
+    then wait until the captcha image src changes and the image is painted.
+    """
+    old_src = ""
+    try:
+        old_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src") or ""
+    except Exception:
+        old_src = ""
+
+    _clear_send_keys_safe(driver, "txtImg1", "1")
+    _click_by_id_safe(driver, "btnSearch_RestMaha")
+    WebDriverWait(driver, timeout).until(lambda d: _captcha_new_image_ready(d, old_src if old_src else None))
+    time.sleep(0.5)
+
+
+def _submit_captcha_candidates(driver, candidates: list[str], timeout=120):
+    """
+    Try a list of captcha candidates. Returns (status, message, captcha_used).
+    """
+    last_status = None
+    last_message = None
+    for captcha_text in candidates:
+        cap = (captcha_text or "").strip()
+        if not cap:
+            continue
+
+        print("Captcha candidate:", cap)
+        _clear_send_keys_safe(driver, "txtImg1", cap)
+        _click_by_id_safe(driver, "btnSearch_RestMaha")
+        status, message = _wait_for_search_outcome(driver, timeout=timeout)
+        last_status, last_message = status, message
+
+        # Wrong captcha: try next candidate (do not treat as "no load").
+        if status in ("error", "message") and message and "captcha" in message.lower():
+            continue
+
+        return status, message, cap
+
+    return last_status or "error", last_message, None
 
 
 def _wait_for_dropdown_population(driver, dropdown_id, timeout=20):
@@ -769,41 +827,55 @@ def run_selenium_for_property(property_no: int, village_index: int, pagination_p
 
         _clear_send_keys_safe(driver, "txtAttributeValue1", str(property_no))
 
-        max_dummy_attempts = 4
-        for attempt in range(1, max_dummy_attempts + 1):
-            old_src = ""
-            try:
-                old_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src") or ""
-            except Exception:
-                pass
-
-            _clear_send_keys_safe(driver, "txtImg1", "1")
-            _click_by_id_safe(driver, "btnSearch_RestMaha")
-            print(f"Dummy captcha submitted (attempt {attempt}/{max_dummy_attempts}), waiting for new captcha...")
-
-            try:
-                _wait_for_captcha_loaded(driver, baseline_src=old_src if old_src else None, timeout=35)
-            except Exception:
-                if attempt == max_dummy_attempts:
-                    raise
-                _wait_for_captcha_loaded(driver, baseline_src=None, timeout=20)
-
-            print("New captcha fully loaded")
-            time.sleep(0.5)
-            break
-
-        captcha_text = (solve_captcha(driver) or "").upper()
-        print("Captcha:", captcha_text)
-        _clear_send_keys_safe(driver, "txtImg1", captcha_text)
-
         pre_submit_viewstate = ""
         try:
             pre_submit_viewstate = driver.find_element(By.ID, "__VIEWSTATE").get_attribute("value") or ""
         except Exception:
             pass
 
-        _click_by_id_safe(driver, "btnSearch_RestMaha")
-        status, message = _wait_for_search_outcome(driver, timeout=120)
+        # Always start by forcing a fresh captcha image via dummy submit.
+        max_dummy_attempts = 4
+        for attempt in range(1, max_dummy_attempts + 1):
+            try:
+                print(f"Dummy captcha submitted (attempt {attempt}/{max_dummy_attempts}), waiting for new captcha...")
+                _force_new_captcha_image(driver, timeout=35)
+                print("New captcha fully loaded")
+                break
+            except Exception:
+                if attempt == max_dummy_attempts:
+                    raise
+                time.sleep(0.6)
+
+        # Solve every captcha with Tesseract first.
+        tesseract_candidates = solve_captcha_with_tesseract_from_driver(driver, img_id="imgCaptcha_new") or []
+        if isinstance(tesseract_candidates, str):
+            tesseract_candidates = [tesseract_candidates]
+        status, message, captcha_used = _submit_captcha_candidates(
+            driver, [c for c in tesseract_candidates if c], timeout=120
+        )
+
+        # If "no load" occurs (neither grid nor message appears in time), then switch to CapSolver:
+        # do NOT force captcha refresh here — site typically shows a new captcha automatically.
+        if status == "timeout":
+            print("[NO LOAD] after Tesseract captcha submit — switching to CapSolver")
+            baseline_src = ""
+            try:
+                baseline_src = driver.find_element(By.ID, "imgCaptcha_new").get_attribute("src") or ""
+            except Exception:
+                baseline_src = ""
+            try:
+                _wait_for_captcha_loaded(driver, baseline_src=baseline_src if baseline_src else None, timeout=45)
+            except Exception:
+                # If src-baseline wait fails, at least wait for any painted captcha image.
+                _wait_for_captcha_loaded(driver, baseline_src=None, timeout=35)
+            capsolver_text = (solve_captcha(driver) or "").strip()
+            if not capsolver_text:
+                raise Exception("CapSolver returned empty captcha")
+            status, message, captcha_used = _submit_captcha_candidates(
+                driver,
+                [capsolver_text, capsolver_text.upper(), capsolver_text.lower()],
+                timeout=140,
+            )
 
         if status == "success":
             print("✅ Search completed — results grid visible")
@@ -840,7 +912,7 @@ def run_selenium_for_property(property_no: int, village_index: int, pagination_p
             "district_used": district_used,
             "tahsil_used": tahsil_used,
             "village_used": village_used,
-            "captcha_used": captcha_text,
+            "captcha_used": captcha_used or "",
             "district_name": district_name,
             "tahsil_name": tahsil_name,
             "village_name": village_name,
@@ -1295,7 +1367,40 @@ def _discover_village_indices():
     """
     last_exc = None
     for attempt in range(1, 4):
-        driver = _build_driver()
+        _cleanup_stale_chrome_profiles()
+        profile_dir = tempfile.mkdtemp(prefix="igr_chrome_profile_")
+        driver = None
+        # Use the same "normal" Selenium setup as run_selenium_for_property (per-session profile).
+        options = webdriver.ChromeOptions()
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument(f"--user-data-dir={profile_dir}")
+        if HEADLESS == 1:
+            options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
+            options.add_argument(f"--remote-debugging-port={_debug_port()}")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-background-networking")
+            options.add_argument("--disable-software-rasterizer")
+
+            env_bin = os.environ.get("CHROME_BINARY", "").strip()
+            if env_bin and os.path.exists(env_bin):
+                options.binary_location = env_bin
+            else:
+                linux_candidates = (
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/google-chrome-stable",
+                    "/usr/bin/chromium-browser",
+                    "/usr/bin/chromium",
+                )
+                for p in linux_candidates:
+                    if os.path.exists(p):
+                        options.binary_location = p
+                        break
+        else:
+            options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+        driver = webdriver.Chrome(options=options)
         try:
             print(f"[VILLAGE DISCOVERY] attempt {attempt}/3")
             driver.get(URL)
@@ -1381,7 +1486,12 @@ def _discover_village_indices():
             time.sleep(1.5)
         finally:
             try:
-                driver.quit()
+                if driver is not None:
+                    driver.quit()
+            except Exception:
+                pass
+            try:
+                shutil.rmtree(profile_dir, ignore_errors=True)
             except Exception:
                 pass
     raise last_exc

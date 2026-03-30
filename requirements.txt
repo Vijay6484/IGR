@@ -1,3 +1,8 @@
+#
+# NOTE: You must also install the system `tesseract` binary (not a pip package).
+# - macOS (Homebrew): `brew install tesseract`
+# - Ubuntu/Debian: `sudo apt-get install -y tesseract-ocr`
+#
 attrs==25.4.0
 beautifulsoup4==4.14.3
 certifi==2026.2.25
