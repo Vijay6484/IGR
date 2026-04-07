@@ -222,6 +222,29 @@ def _has_daily_search_limit_exceeded(html: str) -> bool:
     return False
 
 
+def _daily_limit_reason(html: str) -> str | None:
+    """Return the warning text that triggered daily-limit detection (best-effort)."""
+    soup = BeautifulSoup(html, "html.parser")
+    for div in soup.select("div.message.warning"):
+        t = div.get_text(" ", strip=True)
+        if t:
+            return t
+    return None
+
+
+def _net_retry_sleep_s(attempt: int) -> float:
+    return min(20.0, (0.8 * (2 ** min(attempt - 1, 6))) + random.random())
+
+
+def _safe_rotate_and_new_session(session: requests.Session) -> requests.Session:
+    """Rotate and return a fresh session (helps after disconnects/throttles)."""
+    try:
+        _rotate_ip(session)
+    except Exception as e:
+        print(f"IP rotation failed: {e}", file=sys.stderr)
+    return _new_session_with_proxy()
+
+
 def _proxy_urls() -> list[str]:
     raw = os.environ.get("PROXY_LIST", "").strip()
     if not raw:
@@ -537,20 +560,42 @@ def main() -> int:
             attempt = 0
             while attempt < TESSERACT_CAPTCHA_MAX_ATTEMPTS:
                 attempt += 1
-                h1 = dict(FIRSTGET_HEADERS)
-                ck1 = _cookie_header_from_session(s)
-                if ck1:
-                    h1["Cookie"] = ck1
-                r1 = s.get(first_url, headers=h1, timeout=40)
-                r1.raise_for_status()
-                hidden_csrf = _extract_csrf_hidden(r1.text)
+                try:
+                    h1 = dict(FIRSTGET_HEADERS)
+                    ck1 = _cookie_header_from_session(s)
+                    if ck1:
+                        h1["Cookie"] = ck1
+                    r1 = s.get(first_url, headers=h1, timeout=40)
+                    r1.raise_for_status()
+                    hidden_csrf = _extract_csrf_hidden(r1.text)
+                except requests.RequestException as e:
+                    # RemoteDisconnected / timeouts happen frequently during throttling.
+                    print(
+                        f"Network error on first GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                        file=sys.stderr,
+                    )
+                    time.sleep(_net_retry_sleep_s(attempt))
+                    # Rotate + fresh session after repeated network errors.
+                    if attempt % 3 == 0:
+                        s = _safe_rotate_and_new_session(s)
+                    continue
 
-                h2 = dict(CAPTCHA_HEADERS)
-                ck2 = _cookie_header_from_session(s)
-                if ck2:
-                    h2["Cookie"] = ck2
-                r2 = s.get(captcha_url, headers=h2, timeout=40)
-                r2.raise_for_status()
+                try:
+                    h2 = dict(CAPTCHA_HEADERS)
+                    ck2 = _cookie_header_from_session(s)
+                    if ck2:
+                        h2["Cookie"] = ck2
+                    r2 = s.get(captcha_url, headers=h2, timeout=40)
+                    r2.raise_for_status()
+                except requests.RequestException as e:
+                    print(
+                        f"Network error on captcha GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                        file=sys.stderr,
+                    )
+                    time.sleep(_net_retry_sleep_s(attempt))
+                    if attempt % 3 == 0:
+                        s = _safe_rotate_and_new_session(s)
+                    continue
 
                 captcha_text = _solve_captcha_from_png_bytes(r2.content)
                 if not captcha_text.strip():
@@ -580,22 +625,34 @@ def main() -> int:
                     ("yearsel", form_dict.get("yearsel", "")),
                 ]
 
-                h3 = dict(POST_HEADERS)
-                ck3 = _cookie_header_from_session(s)
-                if ck3:
-                    h3["Cookie"] = ck3
-                r3 = s.post(post_url, headers=h3, data=form_items, timeout=60)
-                r3.raise_for_status()
-                last_html = r3.text
-
-                if _has_daily_search_limit_exceeded(last_html):
+                try:
+                    h3 = dict(POST_HEADERS)
+                    ck3 = _cookie_header_from_session(s)
+                    if ck3:
+                        h3["Cookie"] = ck3
+                    r3 = s.post(post_url, headers=h3, data=form_items, timeout=60)
+                    r3.raise_for_status()
+                    last_html = r3.text
+                except requests.RequestException as e:
                     print(
-                        "Daily search limit exceeded; rotating IP and retrying (does not count as captcha attempt).",
+                        f"Network error on search POST (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
                         file=sys.stderr,
                     )
-                    _rotate_ip(s)
+                    time.sleep(_net_retry_sleep_s(attempt))
+                    if attempt % 3 == 0:
+                        s = _safe_rotate_and_new_session(s)
+                    continue
+
+                if _has_daily_search_limit_exceeded(last_html):
+                    why = _daily_limit_reason(last_html)
+                    print(
+                        "Daily search limit exceeded; rotating IP and retrying (does not count as captcha attempt)."
+                        + (f" Warning='{why}'" if why else ""),
+                        file=sys.stderr,
+                    )
+                    s = _safe_rotate_and_new_session(s)
                     attempt -= 1
-                    time.sleep(2.0)
+                    time.sleep(6.0)
                     continue
 
                 if _has_invalid_captcha(last_html):

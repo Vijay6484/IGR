@@ -26,8 +26,6 @@ FIRST_GET_PATH = "/eDisplay/Propertydetails/index"
 CAPTCHA_PATH = "/eDisplay/captcha-image"
 SEARCH_POST_PATH = "/eDisplay/Propertydetails/index"
 
-TRACE_DIR = "http_trace"
-
 # Per (village, free_text): max rounds of GET page + captcha + Tesseract + POST until success.
 TESSERACT_CAPTCHA_MAX_ATTEMPTS = 100
 
@@ -130,98 +128,6 @@ def _cookie_header_from_session(sess: requests.Session) -> str:
         parts.append(f"{k}={v}")
     return "; ".join(parts)
 
-
-def _ensure_trace_dir() -> str:
-    os.makedirs(TRACE_DIR, exist_ok=True)
-    return TRACE_DIR
-
-
-def _safe_trace_tag(tag: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", tag).strip("_") or "trace"
-
-
-def _write_http_request(path: str, prep: requests.PreparedRequest) -> None:
-    # Format matches res_req_example/*_request.txt
-    url = requests.utils.urlparse(prep.url)
-    req_path = url.path or "/"
-    if url.query:
-        req_path += f"?{url.query}"
-
-    with open(path, "w", encoding="utf-8", errors="ignore") as f:
-        f.write(f"{prep.method} {req_path} HTTP/1.1\n")
-        f.write(f"Host: {url.netloc}\n")
-        for k, v in prep.headers.items():
-            if k.lower() == "host":
-                continue
-            f.write(f"{k}: {v}\n")
-        f.write("\n")
-        body = prep.body
-        if body is None:
-            return
-        if isinstance(body, bytes):
-            try:
-                f.write(body.decode("utf-8", errors="replace"))
-            except Exception:
-                f.write("<binary body>\n")
-        else:
-            f.write(str(body))
-
-
-def _write_http_response(
-    path: str,
-    resp: requests.Response,
-    *,
-    body_text: str | None = None,
-    body_binary_path: str | None = None,
-) -> None:
-    # Format matches res_req_example/*_response.txt
-    with open(path, "w", encoding="utf-8", errors="ignore") as f:
-        f.write(f"HTTP/1.1 {resp.status_code} {resp.reason}\n")
-        for k, v in resp.headers.items():
-            f.write(f"{k}: {v}\n")
-        f.write("\n")
-        if body_binary_path:
-            f.write(f"<binary body saved to {body_binary_path}>\n")
-        else:
-            if body_text is not None:
-                f.write(body_text)
-            else:
-                ct = (resp.headers.get("Content-Type") or "").lower()
-                # For streamed responses (e.g. PDFs), resp.content may be unavailable after consumption.
-                clen = resp.headers.get("Content-Length") or "unknown"
-                f.write(f"<binary body not saved; Content-Type={ct or 'unknown'}; Content-Length={clen}>\n")
-
-
-def _trace_pair(
-    tag: str,
-    prep: requests.PreparedRequest,
-    resp: requests.Response,
-    *,
-    binary_body_ext: str | None = None,
-) -> None:
-    _ensure_trace_dir()
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    safe = _safe_trace_tag(tag)
-
-    req_path = os.path.join(TRACE_DIR, f"{ts}_{safe}_request.txt")
-    res_path = os.path.join(TRACE_DIR, f"{ts}_{safe}_response.txt")
-
-    _write_http_request(req_path, prep)
-
-    body_bin_path: str | None = None
-    body_text: str | None = None
-    if binary_body_ext:
-        body_bin_path = os.path.join(TRACE_DIR, f"{ts}_{safe}{binary_body_ext}")
-        with open(body_bin_path, "wb") as bf:
-            bf.write(resp.content)
-    else:
-        ct = (resp.headers.get("Content-Type") or "").lower()
-        if "text" in ct or "html" in ct or "json" in ct or ct == "":
-            body_text = resp.text
-        else:
-            body_text = None
-
-    _write_http_response(res_path, resp, body_text=body_text, body_binary_path=body_bin_path)
 
 village_dict = {
     0: "अवसरेनगर",
@@ -845,11 +751,6 @@ def _download_pdf(
                     except OSError:
                         pass
                     raise requests.RequestException("Downloaded file is not a valid PDF")
-                _trace_pair(
-                    tag=f"pdf_request_{row.filename_base}",
-                    prep=prep,
-                    resp=r,
-                )
                 return out_path
             finally:
                 r.close()
@@ -1091,11 +992,6 @@ def main() -> int:
                     prep1 = s.prepare_request(req1)
                     r1 = s.send(prep1, timeout=40)
                     r1.raise_for_status()
-                    _trace_pair(
-                        tag=f"firstget_village_{village_id}_free_{free_text_value}_round{pdf_outer_round}_attempt_{attempt}",
-                        prep=prep1,
-                        resp=r1,
-                    )
                     hidden_csrf = _extract_csrf_hidden(r1.text)
 
                     # Step 2: captcha image (also refreshes PHPSESSID)
@@ -1107,12 +1003,6 @@ def main() -> int:
                     prep2 = s.prepare_request(req2)
                     r2 = s.send(prep2, timeout=40)
                     r2.raise_for_status()
-                    _trace_pair(
-                        tag=f"captcha_get_village_{village_id}_free_{free_text_value}_round{pdf_outer_round}_attempt_{attempt}",
-                        prep=prep2,
-                        resp=r2,
-                        binary_body_ext=".png",
-                    )
 
                     # Step 3: solve captcha (Tesseract)
                     captcha_text = _solve_captcha_from_png_bytes(r2.content)
@@ -1156,11 +1046,6 @@ def main() -> int:
                     r3 = s.send(prep3, timeout=60)
                     r3.raise_for_status()
                     last_html = r3.text
-                    _trace_pair(
-                        tag=f"search_post_village_{village_id}_free_{free_text_value}_round{pdf_outer_round}_attempt_{attempt}",
-                        prep=prep3,
-                        resp=r3,
-                    )
 
                     if _has_daily_search_limit_exceeded(last_html):
                         print(
@@ -1210,10 +1095,7 @@ def main() -> int:
                 base_rows = _parse_pdf_rows(last_html, out_dir=download_dir)
                 pdf_rows = base_rows
                 if not pdf_rows:
-                    debug_name = f"debug_search_village_{village_id}_free_text_{free_text}.html"
-                    with open(debug_name, "w", encoding="utf-8", errors="ignore") as f:
-                        f.write(last_html)
-                    print(f"No records. Wrote {debug_name}")
+                    print(f"No records (no PDF links in search HTML). village_id={village_id} free_text={free_text}")
                     _mark_iteration_done(
                         state, village_id, free_text, max_free_text, sorted_village_ids, cp_path
                     )
