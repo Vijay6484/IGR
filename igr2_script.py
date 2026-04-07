@@ -1323,6 +1323,14 @@ def main() -> int:
                 iteration_finished = True
                 break
 
+            # Rotate IP between free_text values (helps avoid per-IP throttles).
+            if os.getenv("ROTATE_IP_EACH_FREE_TEXT", "1").strip().lower() in ("1", "true", "yes"):
+                try:
+                    _rotate_ip(s)
+                    s = _new_session_with_proxy()
+                except Exception as e:
+                    print(f"IP rotation between free_text failed: {e}", file=sys.stderr)
+
             time.sleep(0.25)
 
     state["ongoing"] = None
