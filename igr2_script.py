@@ -464,7 +464,7 @@ DEFAULT_FORM_VALUES: dict[str, str] = {
     "article_name": "",
     "village_name": "आकुर्डी",
     "freetext": "",
-    "yearsel": "2026",
+    "yearsel": "2025",
 }
 
 
