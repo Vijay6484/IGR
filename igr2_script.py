@@ -697,34 +697,51 @@ def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
         url = urljoin(BASE_URL, href)
 
         # Try to name based on the row's <td> values.
-        # User wants: include the serial (usually col 1) and ALSO the last column.
+        # Requirements:
+        # - filename should start with the REAL table serial number
+        # - include first 4 columns + last column
         tr = a.find_parent("tr")
-        cols: list[str] = []
         serial: int | None = None
+        cols_for_name: list[str] = []
         if tr:
             tds = tr.find_all("td")
-            for td in tds[:4]:
-                txt = td.get_text(" ", strip=True)
-                if txt:
-                    cols.append(txt)
-            if tds:
-                last_txt = tds[-1].get_text(" ", strip=True)
-                if last_txt:
-                    cols.append(last_txt)
+            td_texts = [td.get_text(" ", strip=True) for td in tds]
 
-            if tds:
-                first_txt = tds[0].get_text(" ", strip=True)
-                if first_txt and re.fullmatch(r"\d+", first_txt.strip()):
+            # Serial: first numeric cell (some rows have an empty/checkbox first cell).
+            for t in td_texts:
+                tt = (t or "").strip()
+                if re.fullmatch(r"\d{1,5}", tt or ""):
                     try:
-                        serial = int(first_txt.strip())
+                        cand = int(tt)
                     except Exception:
-                        serial = None
+                        continue
+                    # Basic sanity: serial is usually a small-ish positive integer.
+                    if cand >= 1:
+                        serial = cand
+                        break
 
-        if len(cols) < 4:
+            # Name columns: first 4 cells + last cell (as user requested).
+            first4 = [t for t in td_texts[:4] if t]
+            last1 = [td_texts[-1]] if (td_texts and td_texts[-1]) else []
+            cols_for_name = first4 + last1
+
+        if len(cols_for_name) < 4:
             # Fallback: use whatever we got + last path token.
-            cols = cols + [os.path.basename(href)]
-        # Keep first 4 columns and last column (added above) in filename.
-        filename_base = "_".join(_sanitize_filename_part(c) for c in cols)
+            cols_for_name = cols_for_name + [os.path.basename(href)]
+
+        # Force filename to start with real serial, if we could parse it.
+        parts: list[str] = []
+        if serial is not None:
+            parts.append(str(serial))
+        for c in cols_for_name:
+            sc = _sanitize_filename_part(c)
+            if not sc:
+                continue
+            # Avoid duplicating serial if the first column already contains it.
+            if serial is not None and sc == str(serial):
+                continue
+            parts.append(sc)
+        filename_base = "_".join(parts) if parts else _sanitize_filename_part(os.path.basename(href))
         rows.append(PdfRow(serial=serial, filename_base=filename_base, url=url, out_dir=out_dir))
 
     # Deduplicate by URL (some pages repeat same link in hidden areas)
@@ -752,7 +769,7 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
         prep = session.prepare_request(req)
         try:
             # Separate connect/read timeouts helps on flaky connections.
-            r = session.send(prep, stream=True, timeout=(30, 180))
+            r = session.send(prep, stream=True, timeout=(60, 300))
             try:
                 if r.status_code in (429, 500, 502, 503, 504):
                     # Transient server-side failures / rate limiting.
@@ -998,6 +1015,7 @@ def main() -> int:
             pdf_outer_round = 0
             iteration_finished = False
             pending_serials: set[int] | None = None
+            pending_urls: set[str] | None = None
             while not iteration_finished:
                 pdf_outer_round += 1
                 last_html: str | None = None
@@ -1129,7 +1147,8 @@ def main() -> int:
                     _sanitize_filename_part(village_dir_name),
                 )
 
-                pdf_rows = _parse_pdf_rows(last_html, out_dir=download_dir)
+                base_rows = _parse_pdf_rows(last_html, out_dir=download_dir)
+                pdf_rows = base_rows
                 if not pdf_rows:
                     debug_name = f"debug_search_village_{village_id}_free_text_{free_text}.html"
                     with open(debug_name, "w", encoding="utf-8", errors="ignore") as f:
@@ -1141,16 +1160,32 @@ def main() -> int:
                     iteration_finished = True
                     break
 
-                # If we detected missing/failed serial numbers earlier, only retry those.
-                if pending_serials is not None:
-                    pdf_rows = [r for r in pdf_rows if (r.serial in pending_serials) or (r.serial is None)]
-
-                # Detect missing serial numbers from the table, if the first column is numeric.
-                serials = sorted({r.serial for r in pdf_rows if r.serial is not None})
+                # Detect missing serial numbers from the table, if available.
+                serials = sorted({r.serial for r in base_rows if r.serial is not None})
                 missing_serials: set[int] = set()
                 if serials:
                     expected = set(range(1, max(serials) + 1))
                     missing_serials = expected - set(serials)
+
+                # Build pending URL set on first round (only those not already downloaded).
+                if pending_urls is None:
+                    pending_urls = set()
+                    for r in base_rows:
+                        out_path = os.path.join(r.out_dir, f"{r.filename_base}.pdf")
+                        if not (os.path.isfile(out_path) and os.path.getsize(out_path) > 0):
+                            pending_urls.add(r.url)
+
+                # If we detected missing/failed serial numbers earlier, only retry those,
+                # AND/OR any still-pending URLs.
+                if pending_serials is not None:
+                    pdf_rows = [
+                        r
+                        for r in base_rows
+                        if (r.serial in pending_serials)
+                        or (pending_urls is not None and r.url in pending_urls)
+                    ]
+                else:
+                    pdf_rows = [r for r in base_rows if pending_urls is None or r.url in pending_urls]
 
                 print(
                     f"Found {len(pdf_rows)} PDFs (outer round {pdf_outer_round}/{max_pdf_full_rounds}). "
@@ -1174,6 +1209,8 @@ def main() -> int:
                             path = fut.result()
                             completed += 1
                             total_downloaded += 1
+                            if pending_urls is not None:
+                                pending_urls.discard(row.url)
                             if completed % 5 == 0 or completed == len(pdf_rows):
                                 print(f"Downloaded {completed}/{len(pdf_rows)} (total={total_downloaded})")
                             else:
@@ -1214,14 +1251,14 @@ def main() -> int:
 
                     print(
                         f"{len(failures)} PDF(s) failed; max full IP-rotation rounds ({max_pdf_full_rounds}) reached. "
-                        "Advancing checkpoint.",
+                        "NOT advancing checkpoint (to avoid losing documents).",
                         file=sys.stderr,
                     )
-                    _mark_iteration_done(
-                        state, village_id, free_text, max_free_text, sorted_village_ids, cp_path
-                    )
-                    iteration_finished = True
-                    break
+                    state["status"] = "blocked"
+                    state["ongoing"] = {"village_id": village_id, "free_text": free_text}
+                    state["resume"] = {"village_id": village_id, "free_text": free_text}
+                    _save_checkpoint(cp_path, state)
+                    return 2
 
                 state.pop("last_pdf_failures", None)
                 if missing_serials and pdf_outer_round < max_pdf_full_rounds:
