@@ -32,6 +32,9 @@ TESSERACT_CAPTCHA_MAX_ATTEMPTS = 100
 
 # After PDF download failures: full re-run (captcha + search + PDFs) with new IP, same village/free_text.
 # Env MAX_PDF_FULL_RETRY_ROUNDS overrides (default 20).
+# PDF server errors (500): PDF_SERVER_ERROR_MAX_RETRIES (default 100), PDF_SERVER_ERROR_WAIT_BASE,
+#   PDF_SERVER_ERROR_WAIT_GROWTH, PDF_SERVER_ERROR_WAIT_MAX_SEC — long waits between retries (browser-like).
+# PDF_CONNECT_MAX_RETRIES (default 20) for connect/read/invalid-PDF errors.
 
 # --- IP rotation (VPS): set one or more of ---
 # PROXY_LIST=http://user:pass@host:port,...  (comma-separated; cycles on each rotate)
@@ -764,7 +767,18 @@ def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
     return list(uniq.values())
 
 
-def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_retries: int = 5) -> str:
+def _pdf_server_error_wait_seconds(server_attempt: int) -> float:
+    """Like a browser tab: wait longer after each 500 until the backend recovers."""
+    base = float(os.getenv("PDF_SERVER_ERROR_WAIT_BASE", "8"))
+    growth = float(os.getenv("PDF_SERVER_ERROR_WAIT_GROWTH", "1.25"))
+    cap = float(os.getenv("PDF_SERVER_ERROR_WAIT_MAX_SEC", "120"))
+    return min(cap, base * (growth ** min(server_attempt - 1, 40))) + random.uniform(0, 3)
+
+
+def _download_pdf(
+    session: requests.Session, row: PdfRow, out_dir: str, *, max_retries: int = 5
+) -> str:
+    """Download one PDF. Retries 500s with long waits (browser-like). max_retries is legacy/unused."""
     # `out_dir` kept for backwards-compat; prefer row.out_dir.
     os.makedirs(row.out_dir, exist_ok=True)
     out_path = os.path.join(row.out_dir, f"{row.filename_base}.pdf")
@@ -772,42 +786,54 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
         return out_path
     headers = _default_headers(SEARCH_POST_PATH)
 
-    last_exc: Exception | None = None
-    for attempt in range(1, max_retries + 1):
-        # Exponential backoff with jitter to avoid hammering the server when it is unstable.
-        # (Browser often succeeds after waiting a bit; same idea here.)
-        backoff_s = min(30.0, (0.8 * (2 ** (attempt - 1))) + random.random())
-        tmp_path = out_path + ".part"
+    # 500/502/503/504/429: keep retrying with long waits (browser reload behaviour), not just 5 tries.
+    max_server_retries = int(os.getenv("PDF_SERVER_ERROR_MAX_RETRIES", "100"))
+    max_server_retries = max(1, min(500, max_server_retries))
+
+    # Connection/read/invalid-PDF: separate cap (default 20).
+    max_connect_retries = int(os.getenv("PDF_CONNECT_MAX_RETRIES", "20"))
+    max_connect_retries = max(1, min(100, max_connect_retries))
+
+    connect_attempt = 0
+    server_attempt = 0
+    tmp_path = out_path + ".part"
+
+    while True:
+        backoff_s = min(45.0, (0.8 * (2 ** min(connect_attempt, 10))) + random.random())
         req = requests.Request("GET", row.url, headers=headers)
         prep = session.prepare_request(req)
         try:
-            # Separate connect/read timeouts helps on flaky connections.
             r = session.send(prep, stream=True, timeout=(60, 300))
             try:
                 if r.status_code in (429, 500, 502, 503, 504):
-                    # Transient server-side failures / rate limiting.
                     retry_after = r.headers.get("Retry-After")
-                    r.close()
-                    if attempt < max_retries:
-                        print(
-                            f"PDF GET {r.status_code} for {row.url[:80]}... retry {attempt}/{max_retries}",
-                            file=sys.stderr,
+                    sc = r.status_code
+                    server_attempt += 1
+                    if server_attempt > max_server_retries:
+                        raise RuntimeError(
+                            f"PDF GET {sc} for {row.url[:80]}... "
+                            f"gave up after {max_server_retries} server-error retries"
                         )
-                        if retry_after:
-                            try:
-                                time.sleep(min(60.0, float(retry_after)))
-                            except Exception:
-                                time.sleep(backoff_s)
-                        else:
-                            time.sleep(backoff_s)
-                        continue
+                    wait_s = _pdf_server_error_wait_seconds(server_attempt)
+                    if retry_after:
+                        try:
+                            wait_s = max(wait_s, min(120.0, float(retry_after)))
+                        except Exception:
+                            pass
+                    print(
+                        f"PDF GET {sc} for {row.url[:80]}... "
+                        f"waiting {wait_s:.1f}s ({server_attempt}/{max_server_retries}, browser-like retry)",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait_s)
+                    continue
+
                 r.raise_for_status()
                 with open(tmp_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1024 * 64):
                         if chunk:
                             f.write(chunk)
                 os.replace(tmp_path, out_path)
-                # If server returned an HTML error page, it won't start with %PDF-.
                 if not _is_valid_pdf(out_path):
                     try:
                         os.remove(out_path)
@@ -823,15 +849,15 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
             finally:
                 r.close()
         except requests.RequestException as e:
-            last_exc = e
-            if attempt < max_retries:
-                print(f"PDF GET error (attempt {attempt}/{max_retries}): {e}", file=sys.stderr)
-                time.sleep(backoff_s)
-                continue
-            raise
-    if last_exc:
-        raise last_exc
-    raise RuntimeError("PDF download failed after retries")
+            connect_attempt += 1
+            if connect_attempt >= max_connect_retries:
+                raise
+            print(
+                f"PDF GET error (connect/read {connect_attempt}/{max_connect_retries}): {e}",
+                file=sys.stderr,
+            )
+            time.sleep(backoff_s)
+            continue
 
 
 CHECKPOINT_VERSION = 1
