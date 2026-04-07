@@ -1,0 +1,24 @@
+HTTP/1.1 200 OK
+Date: Mon, 06 Apr 2026 16:29:52 GMT
+Server: 
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Content-Security-Policy: default-src 'self';script-src 'self' 'unsafe-inline';style-src 'self' 'unsafe-inline';img-src 'self';object-src 'none';
+Content-disposition: inline; filename="2245-2026-IndexII.pdf"
+Cache-Control: no-cache, no-store, must-revalidate
+Pragma: no-cache
+X-Generator: mPDF 8.2.0
+Expires: 0
+Last-Modified: Mon, 06 Apr 2026 16:29:53 GMT
+Vary: Accept-Encoding
+Content-Encoding: gzip
+Accept: */*
+X-XSS-Protection: 1; mode=block
+X-Frame-Options: SAMEORIGIN
+X-Content-Type-Options: nosniff
+Referrer-Policy: strict-origin-when-cross-origin
+Keep-Alive: timeout=5, max=300
+Connection: Keep-Alive
+Transfer-Encoding: chunked
+Content-Type: application/pdf
+
+<binary body not saved; Content-Type=application/pdf; Content-Length=unknown>

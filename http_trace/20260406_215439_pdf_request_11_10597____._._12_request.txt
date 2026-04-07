@@ -1,0 +1,11 @@
+GET /eDisplay/propertydetails/indexii/MjAyNg%3D%3D/MDMzMDAwMDAwMDAwMTI1Nzc5MDAwMDEwNTk3MjAyNklT HTTP/1.1
+Host: pay2igr.igrmaharashtra.gov.in
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36
+Accept-Encoding: gzip, deflate, zstd
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Connection: keep-alive
+Accept-Language: en-GB,en;q=0.5
+Referer: https://pay2igr.igrmaharashtra.gov.in/eDisplay/Propertydetails/index
+Origin: https://pay2igr.igrmaharashtra.gov.in
+Cookie: csrf_token=X%2BBxPHOJq2K%2F6PfpNxMlJmNlNjg2OGZkYTJhYzIwMzBkZWZlYmNkYTkzM2Q2NDliNTg2ZDJlNTI%3D; PHPSESSID=b01stab5v8umnfddvhebqek1lj
+

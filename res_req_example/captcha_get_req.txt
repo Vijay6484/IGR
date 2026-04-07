@@ -1,0 +1,18 @@
+GET /eDisplay/captcha-image HTTP/1.1
+Host: pay2igr.igrmaharashtra.gov.in
+Cookie: csrf_token=rXELKiB7xhCHLBnPEmZylzM2Y2E0NjFlYWZiMTAwZDQ4ZmU5MzY1ZTVhMjIzZTRkODQ4OGFkMzA%3D
+Sec-Ch-Ua-Platform: "Android"
+User-Agent: Mozilla/5.0 (Linux; Android 8.0.0; SM-G955U Build/R16NW) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36
+Sec-Ch-Ua: "Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"
+Sec-Ch-Ua-Mobile: ?1
+Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+Sec-Gpc: 1
+Accept-Language: en-GB,en;q=0.5
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: no-cors
+Sec-Fetch-Dest: image
+Referer: https://pay2igr.igrmaharashtra.gov.in/eDisplay/Propertydetails/index
+Accept-Encoding: gzip, deflate, br
+Priority: i
+Connection: keep-alive
+

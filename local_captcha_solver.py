@@ -71,13 +71,13 @@ def _basic_cleanup(text: str) -> str:
     return text
 
 
-def solve_captcha_with_tesseract_from_driver(driver, img_id: str = "imgCaptcha_new"):
+def solve_captcha_with_tesseract_from_bytes(png_bytes: bytes) -> str:
     """
-    Returns a list of candidate captcha strings, similar to the CapSolver helper.
+    Run Tesseract on raw PNG bytes (e.g. from GET /eDisplay/captcha-image).
 
-    Requires:
-      - `tesseract` binary installed on the system
-      - Python packages: pillow, pytesseract
+    Requires: tesseract binary, pillow, pytesseract.
+    Tries several preprocess + OCR settings; returns first non-empty cleaned string,
+    or "" if all attempts fail (caller should fetch a new captcha and retry).
     """
     try:
         import pytesseract
@@ -87,20 +87,62 @@ def solve_captcha_with_tesseract_from_driver(driver, img_id: str = "imgCaptcha_n
             "Missing dependencies for local captcha solving. Install pillow + pytesseract and system tesseract."
         ) from e
 
+    base = Image.open(BytesIO(png_bytes)).convert("RGB")
+    whitelist = r"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+    def _try_ocr(img: Image.Image, psm: int) -> str:
+        cfg = rf"--oem 3 --psm {psm} -c tessedit_char_whitelist={whitelist}"
+        raw = pytesseract.image_to_string(img, config=cfg)
+        return _basic_cleanup(raw)
+
+    variants: list[tuple[str, Image.Image]] = []
+
+    # 1) Original pipeline (median + upscale + threshold)
+    g = ImageOps.grayscale(base)
+    g = ImageOps.autocontrast(g)
+    g = g.filter(ImageFilter.MedianFilter(size=3))
+    g_big = g.resize((g.width * 3, g.height * 3))
+    for thr in (150, 130, 170, 110, 190):
+        bw = g_big.point(lambda p, t=thr: 255 if p > t else 0)
+        variants.append((f"median_thr{thr}", bw))
+        variants.append((f"median_thr{thr}_inv", ImageOps.invert(bw)))
+
+    # 2) Simpler: grayscale + autocontrast + upscale, no median
+    g2 = ImageOps.grayscale(base)
+    g2 = ImageOps.autocontrast(g2)
+    g2 = g2.resize((g2.width * 4, g2.height * 4))
+    for thr in (140, 160, 120):
+        bw2 = g2.point(lambda p, t=thr: 255 if p > t else 0)
+        variants.append((f"simple_thr{thr}", bw2))
+
+    # 3) Raw grayscale enlarged (sometimes thresholding loses thin strokes)
+    g3 = ImageOps.grayscale(base)
+    g3 = ImageOps.autocontrast(g3)
+    g3 = g3.resize((g3.width * 4, g3.height * 4))
+    variants.append(("autocontrast_only", g3))
+
+    psms = (7, 8, 13, 6)
+    for _name, im in variants:
+        for psm in psms:
+            try:
+                t = _try_ocr(im, psm)
+                if t:
+                    return t
+            except Exception:
+                continue
+    return ""
+
+
+def solve_captcha_with_tesseract_from_driver(driver, img_id: str = "imgCaptcha_new"):
+    """
+    Returns a list of candidate captcha strings, similar to the CapSolver helper.
+
+    Requires:
+      - `tesseract` binary installed on the system
+      - Python packages: pillow, pytesseract
+    """
     png_bytes = _get_captcha_png_bytes_via_canvas(driver, img_id=img_id)
-
-    img = Image.open(BytesIO(png_bytes)).convert("RGB")
-    # Preprocess: grayscale, increase contrast, denoise, threshold, upscale
-    img = ImageOps.grayscale(img)
-    img = ImageOps.autocontrast(img)
-    img = img.filter(ImageFilter.MedianFilter(size=3))
-    img = img.resize((img.width * 3, img.height * 3))
-    img = img.point(lambda p: 255 if p > 150 else 0)
-
-    config = r"--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    raw = pytesseract.image_to_string(img, config=config)
-    cleaned = _basic_cleanup(raw)
-
+    cleaned = solve_captcha_with_tesseract_from_bytes(png_bytes)
     if not cleaned:
         return None
 

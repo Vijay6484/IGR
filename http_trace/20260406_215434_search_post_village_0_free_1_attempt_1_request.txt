@@ -1,0 +1,25 @@
+POST /eDisplay/Propertydetails/index HTTP/1.1
+Host: pay2igr.igrmaharashtra.gov.in
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36
+Accept-Encoding: gzip, deflate, br
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8
+Connection: keep-alive
+Cache-Control: max-age=0
+Sec-Ch-Ua: "Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"
+Sec-Ch-Ua-Mobile: ?0
+Sec-Ch-Ua-Platform: "macOS"
+Origin: https://pay2igr.igrmaharashtra.gov.in
+Content-Type: application/x-www-form-urlencoded
+Upgrade-Insecure-Requests: 1
+Sec-Gpc: 1
+Accept-Language: en-GB,en;q=0.5
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: navigate
+Sec-Fetch-User: ?1
+Sec-Fetch-Dest: document
+Referer: https://pay2igr.igrmaharashtra.gov.in/eDisplay/Propertydetails/index
+Priority: u=0, i
+Cookie: csrf_token=X%2BBxPHOJq2K%2F6PfpNxMlJmNlNjg2OGZkYTJhYzIwMzBkZWZlYmNkYTkzM2Q2NDliNTg2ZDJlNTI%3D; PHPSESSID=b01stab5v8umnfddvhebqek1lj
+Content-Length: 498
+
+_csrfToken=%2BMlGbvC4RAlrTZrvMrFZ9kR4n11COGNILIa80aQR67zeAGO5eD2h0wE9U7JwZP7%2Fyksxv%2BMWHFunKTdSgzHva9SlbQYFonzQJx2pZXQABSxNtN2yliHYjLplBdwaXsWyOA5g1kZQx53%2Fcwfb0XMpaQ%3D%3D&years=3&district_id=23&taluka_id=1&village_id=0&article_id=&free_text=1&partyname=&captcha=Wf23Zq&dist_name=%E0%A4%AA%E0%A5%81%E0%A4%A3%E0%A5%87&tal_name=%E0%A4%B9%E0%A4%B5%E0%A5%87%E0%A4%B2%E0%A5%80&article_name=&village_name=%E0%A4%85%E0%A4%B5%E0%A4%B8%E0%A4%B0%E0%A5%87%E0%A4%A8%E0%A4%97%E0%A4%B0&freetext=&yearsel=2026
