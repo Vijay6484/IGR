@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import random
 import subprocess
 import sys
 import time
@@ -725,20 +726,32 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
 
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
+        # Exponential backoff with jitter to avoid hammering the server when it is unstable.
+        # (Browser often succeeds after waiting a bit; same idea here.)
+        backoff_s = min(30.0, (0.8 * (2 ** (attempt - 1))) + random.random())
         tmp_path = out_path + ".part"
         req = requests.Request("GET", row.url, headers=headers)
         prep = session.prepare_request(req)
         try:
-            r = session.send(prep, stream=True, timeout=90)
+            # Separate connect/read timeouts helps on flaky connections.
+            r = session.send(prep, stream=True, timeout=(30, 180))
             try:
-                if r.status_code >= 500:
+                if r.status_code in (429, 500, 502, 503, 504):
+                    # Transient server-side failures / rate limiting.
+                    retry_after = r.headers.get("Retry-After")
                     r.close()
                     if attempt < max_retries:
                         print(
                             f"PDF GET {r.status_code} for {row.url[:80]}... retry {attempt}/{max_retries}",
                             file=sys.stderr,
                         )
-                        time.sleep(0.5 * attempt)
+                        if retry_after:
+                            try:
+                                time.sleep(min(60.0, float(retry_after)))
+                            except Exception:
+                                time.sleep(backoff_s)
+                        else:
+                            time.sleep(backoff_s)
                         continue
                 r.raise_for_status()
                 with open(tmp_path, "wb") as f:
@@ -758,7 +771,7 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
             last_exc = e
             if attempt < max_retries:
                 print(f"PDF GET error (attempt {attempt}/{max_retries}): {e}", file=sys.stderr)
-                time.sleep(0.5 * attempt)
+                time.sleep(backoff_s)
                 continue
             raise
     if last_exc:
@@ -941,7 +954,10 @@ def main() -> int:
     # - village_id: loop over village_dict keys (uses village_dict to set village_name)
     # - free_text: 0..9
     total_downloaded = 0
-    max_workers = min(16, max(4, (os.cpu_count() or 8)))
+    # High concurrency causes many transient 500s / resets on IGR (seen to recover in browser).
+    # Keep a conservative default; allow overriding via env.
+    max_workers = int(os.getenv("PDF_MAX_WORKERS", "6"))
+    max_workers = max(1, min(16, max_workers))
 
     for village_id in sorted_village_ids:
         village_name = village_dict[village_id]
