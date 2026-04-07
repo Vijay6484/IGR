@@ -4,6 +4,7 @@ import json
 import os
 import re
 import random
+import argparse
 import subprocess
 import sys
 import time
@@ -467,7 +468,7 @@ DEFAULT_FORM_VALUES: dict[str, str] = {
     "article_name": "",
     "village_name": "आकुर्डी",
     "freetext": "",
-    "yearsel": "2024",
+    "yearsel": "2025",
 }
 
 
@@ -974,6 +975,16 @@ def _mark_iteration_done(
 def main() -> int:
     out_dir = os.path.join(os.getcwd(), "output")
     s = _new_session_with_proxy()
+
+    parser = argparse.ArgumentParser(description="IGR scraper (igr2_script.py)")
+    parser.add_argument(
+        "--yearsel",
+        default=os.getenv("YEARSEL", DEFAULT_FORM_VALUES.get("yearsel", "2025")),
+        help="Year selection (maps to form field 'yearsel'), e.g. 2025 or 2026. "
+        "Can also be set via env YEARSEL.",
+    )
+    args = parser.parse_args()
+    DEFAULT_FORM_VALUES["yearsel"] = str(args.yearsel)
 
     first_url = urljoin(BASE_URL, FIRST_GET_PATH)
     captcha_url = urljoin(BASE_URL, CAPTCHA_PATH)
