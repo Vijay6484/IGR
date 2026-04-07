@@ -471,6 +471,7 @@ DEFAULT_FORM_VALUES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class PdfRow:
+    serial: int | None
     filename_base: str
     url: str
     out_dir: str
@@ -695,21 +696,36 @@ def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
             continue
         url = urljoin(BASE_URL, href)
 
-        # Try to name based on the first 4 <td> values of the row containing this link.
+        # Try to name based on the row's <td> values.
+        # User wants: include the serial (usually col 1) and ALSO the last column.
         tr = a.find_parent("tr")
         cols: list[str] = []
+        serial: int | None = None
         if tr:
             tds = tr.find_all("td")
             for td in tds[:4]:
                 txt = td.get_text(" ", strip=True)
                 if txt:
                     cols.append(txt)
+            if tds:
+                last_txt = tds[-1].get_text(" ", strip=True)
+                if last_txt:
+                    cols.append(last_txt)
+
+            if tds:
+                first_txt = tds[0].get_text(" ", strip=True)
+                if first_txt and re.fullmatch(r"\d+", first_txt.strip()):
+                    try:
+                        serial = int(first_txt.strip())
+                    except Exception:
+                        serial = None
 
         if len(cols) < 4:
             # Fallback: use whatever we got + last path token.
             cols = cols + [os.path.basename(href)]
-        filename_base = "_".join(_sanitize_filename_part(c) for c in cols[:4])
-        rows.append(PdfRow(filename_base=filename_base, url=url, out_dir=out_dir))
+        # Keep first 4 columns and last column (added above) in filename.
+        filename_base = "_".join(_sanitize_filename_part(c) for c in cols)
+        rows.append(PdfRow(serial=serial, filename_base=filename_base, url=url, out_dir=out_dir))
 
     # Deduplicate by URL (some pages repeat same link in hidden areas)
     uniq: dict[str, PdfRow] = {}
@@ -722,6 +738,8 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
     # `out_dir` kept for backwards-compat; prefer row.out_dir.
     os.makedirs(row.out_dir, exist_ok=True)
     out_path = os.path.join(row.out_dir, f"{row.filename_base}.pdf")
+    if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+        return out_path
     headers = _default_headers(SEARCH_POST_PATH)
 
     last_exc: Exception | None = None
@@ -979,6 +997,7 @@ def main() -> int:
             max_pdf_full_rounds = int(os.getenv("MAX_PDF_FULL_RETRY_ROUNDS", "20"))
             pdf_outer_round = 0
             iteration_finished = False
+            pending_serials: set[int] | None = None
             while not iteration_finished:
                 pdf_outer_round += 1
                 last_html: str | None = None
@@ -1122,9 +1141,21 @@ def main() -> int:
                     iteration_finished = True
                     break
 
+                # If we detected missing/failed serial numbers earlier, only retry those.
+                if pending_serials is not None:
+                    pdf_rows = [r for r in pdf_rows if (r.serial in pending_serials) or (r.serial is None)]
+
+                # Detect missing serial numbers from the table, if the first column is numeric.
+                serials = sorted({r.serial for r in pdf_rows if r.serial is not None})
+                missing_serials: set[int] = set()
+                if serials:
+                    expected = set(range(1, max(serials) + 1))
+                    missing_serials = expected - set(serials)
+
                 print(
                     f"Found {len(pdf_rows)} PDFs (outer round {pdf_outer_round}/{max_pdf_full_rounds}). "
                     f"Downloading with {max_workers} workers to: {out_dir}"
+                    + (f" (missing serials in table: {sorted(missing_serials)[:20]}...)" if missing_serials else "")
                 )
 
                 def _worker(row: PdfRow) -> str:
@@ -1167,10 +1198,13 @@ def main() -> int:
                     ]
 
                     if pdf_outer_round < max_pdf_full_rounds:
+                        # Retry only failed + missing serial numbers next outer round.
+                        failed_serials = {r.serial for r, _ in failures if r.serial is not None}
+                        pending_serials = set(missing_serials) | set(failed_serials)
                         print(
                             f"{len(failures)} PDF(s) still failing after per-URL retries; "
-                            "rotating IP and retrying full flow (captcha + search + PDFs) "
-                            f"for same village_id={village_id} free_text={free_text} "
+                            "rotating IP and retrying full flow for missing/failed serials "
+                            f"for same village_id={village_id} free_text={free_text}. "
                             f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
                             file=sys.stderr,
                         )
@@ -1190,6 +1224,16 @@ def main() -> int:
                     break
 
                 state.pop("last_pdf_failures", None)
+                if missing_serials and pdf_outer_round < max_pdf_full_rounds:
+                    pending_serials = set(missing_serials)
+                    print(
+                        f"Table shows missing serials {sorted(missing_serials)}; rotating IP and retrying those only "
+                        f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
+                        file=sys.stderr,
+                    )
+                    _rotate_ip(s)
+                    s = _new_session_with_proxy()
+                    continue
                 _mark_iteration_done(
                     state, village_id, free_text, max_free_text, sorted_village_ids, cp_path
                 )
