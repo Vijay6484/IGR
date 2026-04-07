@@ -1,0 +1,18 @@
+{
+  "updated_at": "2026-04-07T11:15:01.517016+00:00",
+  "yearsel": "2026",
+  "dist_name": "पुणे",
+  "tal_name": "हवेली",
+  "max_free_text": 10,
+  "max_village": -1,
+  "status": "running",
+  "resume": {
+    "village_id": 0,
+    "free_text": 0
+  },
+  "ongoing": {
+    "village_id": 0,
+    "free_text": 0
+  },
+  "completed_pairs": []
+}
