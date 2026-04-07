@@ -684,6 +684,9 @@ def _is_valid_pdf(path: str) -> bool:
 def _record_pdf_issues(
     state: dict,
     *,
+    yearsel: str,
+    dist_name: str,
+    tal_name: str,
     village_id: int,
     village_name: str,
     free_text: int,
@@ -700,6 +703,9 @@ def _record_pdf_issues(
     per_ft = per_village.setdefault(ft_key, {})
 
     per_ft["updated_at"] = datetime.now(timezone.utc).isoformat()
+    per_ft["yearsel"] = yearsel
+    per_ft["dist_name"] = dist_name
+    per_ft["tal_name"] = tal_name
     per_ft["village_name"] = village_name
     per_ft["missing_serials"] = sorted(missing_serials)
     per_ft["failed_serials"] = sorted(s for s in failed_serials if s is not None)
@@ -1281,7 +1287,9 @@ def main() -> int:
                             ts = datetime.now(timezone.utc).isoformat()
                             for row, err in failures:
                                 lf.write(
-                                    f"{ts}\tvillage_id={village_id}\tfree_text={free_text}\t{row.url}\t{err}\n"
+                                    f"{ts}\tyearsel={yearsel}\tdist_name={dist_name}\ttal_name={tal_name}"
+                                    f"\tvillage_id={village_id}\tvillage_name={village_name}\tfree_text={free_text}"
+                                    f"\tserial={row.serial if row.serial is not None else ''}\t{row.url}\t{err}\n"
                                 )
                     except OSError:
                         pass
@@ -1292,6 +1300,9 @@ def main() -> int:
                     failed_serials = {r.serial for r, _ in failures if r.serial is not None}
                     _record_pdf_issues(
                         state,
+                        yearsel=yearsel,
+                        dist_name=dist_name,
+                        tal_name=tal_name,
                         village_id=village_id,
                         village_name=village_name,
                         free_text=free_text,
@@ -1306,6 +1317,9 @@ def main() -> int:
                 if missing_serials or (pending_urls is not None and pending_urls):
                     _record_pdf_issues(
                         state,
+                        yearsel=yearsel,
+                        dist_name=dist_name,
+                        tal_name=tal_name,
                         village_id=village_id,
                         village_name=village_name,
                         free_text=free_text,
