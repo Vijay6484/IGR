@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-# NOTE: PDFs are downloaded serially for reliability.
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urljoin
@@ -32,9 +32,8 @@ TESSERACT_CAPTCHA_MAX_ATTEMPTS = 100
 
 # After PDF download failures: full re-run (captcha + search + PDFs) with new IP, same village/free_text.
 # Env MAX_PDF_FULL_RETRY_ROUNDS overrides (default 20).
-# PDF server errors (500): PDF_SERVER_ERROR_MAX_RETRIES (default 100), PDF_SERVER_ERROR_WAIT_BASE,
-#   PDF_SERVER_ERROR_WAIT_GROWTH, PDF_SERVER_ERROR_WAIT_MAX_SEC — long waits between retries (browser-like).
-# PDF_CONNECT_MAX_RETRIES (default 20) for connect/read/invalid-PDF errors.
+# PDF_CONNECT_MAX_RETRIES (default 8) for connect/read/invalid-PDF errors.
+# NOTE: HTTP 500/502/503/504/429 are NOT retried (logged instead).
 
 # --- IP rotation (VPS): set one or more of ---
 # PROXY_LIST=http://user:pass@host:port,...  (comma-separated; cycles on each rotate)
@@ -681,6 +680,36 @@ def _is_valid_pdf(path: str) -> bool:
         return False
 
 
+def _record_pdf_issues(
+    state: dict,
+    *,
+    village_id: int,
+    village_name: str,
+    free_text: int,
+    missing_serials: set[int],
+    failed_serials: set[int],
+    pending_urls: set[str] | None,
+    failures: list[tuple[PdfRow, str]],
+) -> None:
+    """Persist missing/failed PDFs into checkpoint JSON (so we can audit later)."""
+    issues = state.setdefault("pdf_issues", {})
+    vid_key = str(village_id)
+    ft_key = str(free_text)
+    per_village = issues.setdefault(vid_key, {})
+    per_ft = per_village.setdefault(ft_key, {})
+
+    per_ft["updated_at"] = datetime.now(timezone.utc).isoformat()
+    per_ft["village_name"] = village_name
+    per_ft["missing_serials"] = sorted(missing_serials)
+    per_ft["failed_serials"] = sorted(s for s in failed_serials if s is not None)
+    per_ft["pending_url_count"] = int(len(pending_urls or []))
+    per_ft["failure_count"] = int(len(failures))
+    per_ft["failures"] = [
+        {"serial": (r.serial if r.serial is not None else None), "url": r.url, "error": err[:300]}
+        for r, err in failures[:50]
+    ]
+
+
 def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -767,18 +796,10 @@ def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
     return list(uniq.values())
 
 
-def _pdf_server_error_wait_seconds(server_attempt: int) -> float:
-    """Like a browser tab: wait longer after each 500 until the backend recovers."""
-    base = float(os.getenv("PDF_SERVER_ERROR_WAIT_BASE", "8"))
-    growth = float(os.getenv("PDF_SERVER_ERROR_WAIT_GROWTH", "1.25"))
-    cap = float(os.getenv("PDF_SERVER_ERROR_WAIT_MAX_SEC", "120"))
-    return min(cap, base * (growth ** min(server_attempt - 1, 40))) + random.uniform(0, 3)
-
-
 def _download_pdf(
     session: requests.Session, row: PdfRow, out_dir: str, *, max_retries: int = 5
 ) -> str:
-    """Download one PDF. Retries 500s with long waits (browser-like). max_retries is legacy/unused."""
+    """Download one PDF. HTTP 5xx/429 are not retried; they are logged upstream."""
     # `out_dir` kept for backwards-compat; prefer row.out_dir.
     os.makedirs(row.out_dir, exist_ok=True)
     out_path = os.path.join(row.out_dir, f"{row.filename_base}.pdf")
@@ -786,16 +807,11 @@ def _download_pdf(
         return out_path
     headers = _default_headers(SEARCH_POST_PATH)
 
-    # 500/502/503/504/429: keep retrying with long waits (browser reload behaviour), not just 5 tries.
-    max_server_retries = int(os.getenv("PDF_SERVER_ERROR_MAX_RETRIES", "100"))
-    max_server_retries = max(1, min(500, max_server_retries))
-
-    # Connection/read/invalid-PDF: separate cap (default 20).
-    max_connect_retries = int(os.getenv("PDF_CONNECT_MAX_RETRIES", "20"))
-    max_connect_retries = max(1, min(100, max_connect_retries))
+    # Connection/read/invalid-PDF: retry a few times.
+    max_connect_retries = int(os.getenv("PDF_CONNECT_MAX_RETRIES", "8"))
+    max_connect_retries = max(1, min(50, max_connect_retries))
 
     connect_attempt = 0
-    server_attempt = 0
     tmp_path = out_path + ".part"
 
     while True:
@@ -806,27 +822,9 @@ def _download_pdf(
             r = session.send(prep, stream=True, timeout=(60, 300))
             try:
                 if r.status_code in (429, 500, 502, 503, 504):
-                    retry_after = r.headers.get("Retry-After")
+                    # Do not retry server errors here; upstream will log per free_text.
                     sc = r.status_code
-                    server_attempt += 1
-                    if server_attempt > max_server_retries:
-                        raise RuntimeError(
-                            f"PDF GET {sc} for {row.url[:80]}... "
-                            f"gave up after {max_server_retries} server-error retries"
-                        )
-                    wait_s = _pdf_server_error_wait_seconds(server_attempt)
-                    if retry_after:
-                        try:
-                            wait_s = max(wait_s, min(120.0, float(retry_after)))
-                        except Exception:
-                            pass
-                    print(
-                        f"PDF GET {sc} for {row.url[:80]}... "
-                        f"waiting {wait_s:.1f}s ({server_attempt}/{max_server_retries}, browser-like retry)",
-                        file=sys.stderr,
-                    )
-                    time.sleep(wait_s)
-                    continue
+                    raise requests.HTTPError(f"PDF GET {sc} for {row.url}", response=r)
 
                 r.raise_for_status()
                 with open(tmp_path, "wb") as f:
@@ -1035,10 +1033,9 @@ def main() -> int:
     # - village_id: loop over village_dict keys (uses village_dict to set village_name)
     # - free_text: 0..9
     total_downloaded = 0
-    # High concurrency causes many transient 500s / resets on IGR (seen to recover in browser).
-    # Keep a conservative default; allow overriding via env.
-    max_workers = int(os.getenv("PDF_MAX_WORKERS", "6"))
-    max_workers = max(1, min(16, max_workers))
+    # Parallel PDF downloads (requested): default 5.
+    max_workers = int(os.getenv("PDF_MAX_WORKERS", "5"))
+    max_workers = max(1, min(10, max_workers))
 
     for village_id in sorted_village_ids:
         village_name = village_dict[village_id]
@@ -1057,7 +1054,7 @@ def main() -> int:
             state["status"] = "running"
             _save_checkpoint(cp_path, state)
 
-            max_pdf_full_rounds = int(os.getenv("MAX_PDF_FULL_RETRY_ROUNDS", "20"))
+            max_pdf_full_rounds = int(os.getenv("MAX_PDF_FULL_RETRY_ROUNDS", "1"))
             pdf_outer_round = 0
             iteration_finished = False
             pending_serials: set[int] | None = None
@@ -1235,40 +1232,36 @@ def main() -> int:
 
                 print(
                     f"Found {len(pdf_rows)} PDFs (outer round {pdf_outer_round}/{max_pdf_full_rounds}). "
-                    f"Downloading serially to: {out_dir}"
+                    f"Downloading with {max_workers} workers to: {out_dir}"
                     + (f" (missing serials in table: {sorted(missing_serials)[:20]}...)" if missing_serials else "")
                 )
 
                 failures: list[tuple[PdfRow, str]] = []
                 completed = 0
-                # Serial / single-threaded PDF downloads (no parallelism).
-                # This is slower but far more reliable for this site.
-                dl_sess = requests.Session()
-                dl_sess.proxies.update(s.proxies)
-                dl_sess.cookies.update(s.cookies)
+                # Parallel PDF downloads.
+                def _worker(row: PdfRow) -> str:
+                    sess = requests.Session()
+                    sess.proxies.update(s.proxies)
+                    sess.cookies.update(s.cookies)
+                    return _download_pdf(sess, row, out_dir)
 
-                def _sort_key(r: PdfRow) -> tuple[int, str]:
-                    # Serial-first; unknown serials go last, stable by URL.
-                    return (r.serial if r.serial is not None else 10**9, r.url)
-
-                for row in sorted(pdf_rows, key=_sort_key):
-                    try:
-                        path = _download_pdf(dl_sess, row, out_dir)
-                        completed += 1
-                        total_downloaded += 1
-                        if pending_urls is not None:
-                            pending_urls.discard(row.url)
-                        if completed % 5 == 0 or completed == len(pdf_rows):
-                            print(f"Downloaded {completed}/{len(pdf_rows)} (total={total_downloaded})")
-                        else:
+                with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                    futs = {ex.submit(_worker, row): row for row in pdf_rows}
+                    for fut in as_completed(futs):
+                        row = futs[fut]
+                        try:
+                            path = fut.result()
+                            completed += 1
+                            total_downloaded += 1
+                            if pending_urls is not None:
+                                pending_urls.discard(row.url)
+                            # Always print filename; also print progress every 5.
                             print(f"Downloaded: {os.path.basename(path)}")
-                        # Tiny pacing helps reduce server resets.
-                        time.sleep(0.15)
-                    except Exception as e:
-                        failures.append((row, str(e)))
-                        print(f"FAILED: {row.url} -> {e}", file=sys.stderr)
-                        # Brief pause before continuing to next doc.
-                        time.sleep(0.5)
+                            if completed % 5 == 0 or completed == len(pdf_rows):
+                                print(f"Progress {completed}/{len(pdf_rows)} (total={total_downloaded})")
+                        except Exception as e:
+                            failures.append((row, str(e)))
+                            print(f"FAILED: {row.url} -> {e}", file=sys.stderr)
 
                 if failures:
                     fail_log = os.path.join(out_dir, "failed_pdf_downloads.txt")
@@ -1285,64 +1278,31 @@ def main() -> int:
                         {"url": r.url, "error": err[:300]} for r, err in failures[:50]
                     ]
 
-                    if pdf_outer_round < max_pdf_full_rounds:
-                        # Retry only failed + missing serial numbers next outer round.
-                        failed_serials = {r.serial for r, _ in failures if r.serial is not None}
-                        pending_serials = set(missing_serials) | set(failed_serials)
-                        print(
-                            f"{len(failures)} PDF(s) still failing after per-URL retries; "
-                            "rotating IP and retrying full flow for missing/failed serials "
-                            f"for same village_id={village_id} free_text={free_text}. "
-                            f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
-                            file=sys.stderr,
-                        )
-                        _rotate_ip(s)
-                        s = _new_session_with_proxy()
-                        continue
-
-                    print(
-                        f"{len(failures)} PDF(s) failed; max full IP-rotation rounds ({max_pdf_full_rounds}) reached. "
-                        "NOT advancing checkpoint (to avoid losing documents).",
-                        file=sys.stderr,
+                    failed_serials = {r.serial for r, _ in failures if r.serial is not None}
+                    _record_pdf_issues(
+                        state,
+                        village_id=village_id,
+                        village_name=village_name,
+                        free_text=free_text,
+                        missing_serials=missing_serials,
+                        failed_serials=set(s for s in failed_serials if s is not None),
+                        pending_urls=pending_urls,
+                        failures=failures,
                     )
-                    state["status"] = "blocked"
-                    state["ongoing"] = {"village_id": village_id, "free_text": free_text}
-                    state["resume"] = {"village_id": village_id, "free_text": free_text}
-                    _save_checkpoint(cp_path, state)
-                    return 2
 
                 state.pop("last_pdf_failures", None)
-                # Even if the executor reported no failures, ensure everything is actually on disk.
-                if pending_urls is not None and pending_urls:
-                    if pdf_outer_round < max_pdf_full_rounds:
-                        print(
-                            f"{len(pending_urls)} PDF(s) still missing/invalid on disk; retrying same free_text "
-                            f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
-                            file=sys.stderr,
-                        )
-                        _rotate_ip(s)
-                        s = _new_session_with_proxy()
-                        continue
-                    print(
-                        f"{len(pending_urls)} PDF(s) still missing/invalid after {max_pdf_full_rounds} rounds. "
-                        "NOT advancing checkpoint (to avoid losing documents).",
-                        file=sys.stderr,
+                # Record missing serials even if no explicit failures.
+                if missing_serials or (pending_urls is not None and pending_urls):
+                    _record_pdf_issues(
+                        state,
+                        village_id=village_id,
+                        village_name=village_name,
+                        free_text=free_text,
+                        missing_serials=missing_serials,
+                        failed_serials=set(),
+                        pending_urls=pending_urls,
+                        failures=[],
                     )
-                    state["status"] = "blocked"
-                    state["ongoing"] = {"village_id": village_id, "free_text": free_text}
-                    state["resume"] = {"village_id": village_id, "free_text": free_text}
-                    _save_checkpoint(cp_path, state)
-                    return 2
-                if missing_serials and pdf_outer_round < max_pdf_full_rounds:
-                    pending_serials = set(missing_serials)
-                    print(
-                        f"Table shows missing serials {sorted(missing_serials)}; rotating IP and retrying those only "
-                        f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
-                        file=sys.stderr,
-                    )
-                    _rotate_ip(s)
-                    s = _new_session_with_proxy()
-                    continue
                 _mark_iteration_done(
                     state, village_id, free_text, max_free_text, sorted_village_ids, cp_path
                 )
@@ -1350,7 +1310,7 @@ def main() -> int:
                 break
 
             # Rotate IP between free_text values (helps avoid per-IP throttles).
-            if os.getenv("ROTATE_IP_EACH_FREE_TEXT", "1").strip().lower() in ("1", "true", "yes"):
+            if os.getenv("ROTATE_IP_EACH_FREE_TEXT", "0").strip().lower() in ("1", "true", "yes"):
                 try:
                     _rotate_ip(s)
                     s = _new_session_with_proxy()
