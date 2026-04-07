@@ -33,7 +33,7 @@ TESSERACT_CAPTCHA_MAX_ATTEMPTS = 100
 
 # After PDF download failures: full re-run (captcha + search + PDFs) with new IP, same village/free_text.
 # Env MAX_PDF_FULL_RETRY_ROUNDS overrides (default 20).
-# PDF_CONNECT_MAX_RETRIES (default 8) for connect/read/invalid-PDF errors.
+# PDF_CONNECT_MAX_RETRIES (default 2) for connect/read/invalid-PDF errors.
 # NOTE: HTTP 500/502/503/504/429 are NOT retried (logged instead).
 
 # --- IP rotation (VPS): set one or more of ---
@@ -815,7 +815,7 @@ def _download_pdf(
     headers = _default_headers(SEARCH_POST_PATH)
 
     # Connection/read/invalid-PDF: retry a few times.
-    max_connect_retries = int(os.getenv("PDF_CONNECT_MAX_RETRIES", "8"))
+    max_connect_retries = int(os.getenv("PDF_CONNECT_MAX_RETRIES", "2"))
     max_connect_retries = max(1, min(50, max_connect_retries))
 
     connect_attempt = 0
@@ -1312,7 +1312,7 @@ def main() -> int:
                         failures=failures,
                     )
 
-                state.pop("last_pdf_failures", None)
+                # Keep last_pdf_failures in checkpoint (memory/audit trail).
                 # Record missing serials even if no explicit failures.
                 if missing_serials or (pending_urls is not None and pending_urls):
                     _record_pdf_issues(
