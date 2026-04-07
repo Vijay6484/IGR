@@ -108,10 +108,16 @@ POST_HEADERS = {
 }
 
 
-# Keep dictionaries in sync with igr2_script.py by importing if needed later.
-district_dict = {23: "पुणे"}
-taluka_dict = {1: "हवेली"}
-village_dict = {0: "अवसरेनगर"}
+# Keep dictionaries in sync with igr2_script.py (source of truth).
+# Fallback to minimal dicts if import fails (so the script can still run standalone).
+try:
+    from igr2_script import district_dict as district_dict  # type: ignore
+    from igr2_script import taluka_dict as taluka_dict  # type: ignore
+    from igr2_script import village_dict as village_dict  # type: ignore
+except Exception:
+    district_dict = {23: "पुणे"}
+    taluka_dict = {1: "हवेली"}
+    village_dict = {0: "अवसरेनगर"}
 
 # Using the same example values for now.
 DEFAULT_FORM_VALUES: dict[str, str] = {

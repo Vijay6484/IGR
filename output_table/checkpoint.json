@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-07T18:18:28.491845+00:00",
+  "updated_at": "2026-04-07T19:04:21.548703+00:00",
   "yearsel": "2025",
   "dist_name": "पुणे",
   "tal_name": "हवेली",
@@ -8,11 +8,14 @@
   "status": "running",
   "resume": {
     "village_id": 0,
-    "free_text": 0
+    "free_text": 2
   },
   "ongoing": {
     "village_id": 0,
-    "free_text": 0
+    "free_text": 2
   },
-  "completed_pairs": []
+  "completed_pairs": [
+    "0:0",
+    "0:1"
+  ]
 }
