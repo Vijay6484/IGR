@@ -665,6 +665,19 @@ def _sanitize_filename_part(s: str) -> str:
     return s or "unknown"
 
 
+def _is_valid_pdf(path: str) -> bool:
+    try:
+        if not os.path.isfile(path):
+            return False
+        if os.path.getsize(path) < 1024:  # too small to be a real PDF here
+            return False
+        with open(path, "rb") as f:
+            head = f.read(5)
+        return head == b"%PDF-"
+    except Exception:
+        return False
+
+
 def _parse_pdf_rows(html: str, *, out_dir: str) -> list[PdfRow]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -755,7 +768,7 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
     # `out_dir` kept for backwards-compat; prefer row.out_dir.
     os.makedirs(row.out_dir, exist_ok=True)
     out_path = os.path.join(row.out_dir, f"{row.filename_base}.pdf")
-    if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+    if _is_valid_pdf(out_path):
         return out_path
     headers = _default_headers(SEARCH_POST_PATH)
 
@@ -794,6 +807,13 @@ def _download_pdf(session: requests.Session, row: PdfRow, out_dir: str, *, max_r
                         if chunk:
                             f.write(chunk)
                 os.replace(tmp_path, out_path)
+                # If server returned an HTML error page, it won't start with %PDF-.
+                if not _is_valid_pdf(out_path):
+                    try:
+                        os.remove(out_path)
+                    except OSError:
+                        pass
+                    raise requests.RequestException("Downloaded file is not a valid PDF")
                 _trace_pair(
                     tag=f"pdf_request_{row.filename_base}",
                     prep=prep,
@@ -1172,7 +1192,7 @@ def main() -> int:
                     pending_urls = set()
                     for r in base_rows:
                         out_path = os.path.join(r.out_dir, f"{r.filename_base}.pdf")
-                        if not (os.path.isfile(out_path) and os.path.getsize(out_path) > 0):
+                        if not _is_valid_pdf(out_path):
                             pending_urls.add(r.url)
 
                 # If we detected missing/failed serial numbers earlier, only retry those,
@@ -1261,6 +1281,27 @@ def main() -> int:
                     return 2
 
                 state.pop("last_pdf_failures", None)
+                # Even if the executor reported no failures, ensure everything is actually on disk.
+                if pending_urls is not None and pending_urls:
+                    if pdf_outer_round < max_pdf_full_rounds:
+                        print(
+                            f"{len(pending_urls)} PDF(s) still missing/invalid on disk; retrying same free_text "
+                            f"(round {pdf_outer_round + 1}/{max_pdf_full_rounds}).",
+                            file=sys.stderr,
+                        )
+                        _rotate_ip(s)
+                        s = _new_session_with_proxy()
+                        continue
+                    print(
+                        f"{len(pending_urls)} PDF(s) still missing/invalid after {max_pdf_full_rounds} rounds. "
+                        "NOT advancing checkpoint (to avoid losing documents).",
+                        file=sys.stderr,
+                    )
+                    state["status"] = "blocked"
+                    state["ongoing"] = {"village_id": village_id, "free_text": free_text}
+                    state["resume"] = {"village_id": village_id, "free_text": free_text}
+                    _save_checkpoint(cp_path, state)
+                    return 2
                 if missing_serials and pdf_outer_round < max_pdf_full_rounds:
                     pending_serials = set(missing_serials)
                     print(
