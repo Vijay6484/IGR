@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# NOTE: PDFs are downloaded serially for reliability.
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import urljoin
@@ -1209,35 +1209,40 @@ def main() -> int:
 
                 print(
                     f"Found {len(pdf_rows)} PDFs (outer round {pdf_outer_round}/{max_pdf_full_rounds}). "
-                    f"Downloading with {max_workers} workers to: {out_dir}"
+                    f"Downloading serially to: {out_dir}"
                     + (f" (missing serials in table: {sorted(missing_serials)[:20]}...)" if missing_serials else "")
                 )
 
-                def _worker(row: PdfRow) -> str:
-                    sess = requests.Session()
-                    sess.proxies.update(s.proxies)
-                    sess.cookies.update(s.cookies)
-                    return _download_pdf(sess, row, out_dir)
-
                 failures: list[tuple[PdfRow, str]] = []
                 completed = 0
-                with ThreadPoolExecutor(max_workers=max_workers) as ex:
-                    futs = {ex.submit(_worker, row): row for row in pdf_rows}
-                    for fut in as_completed(futs):
-                        row = futs[fut]
-                        try:
-                            path = fut.result()
-                            completed += 1
-                            total_downloaded += 1
-                            if pending_urls is not None:
-                                pending_urls.discard(row.url)
-                            if completed % 5 == 0 or completed == len(pdf_rows):
-                                print(f"Downloaded {completed}/{len(pdf_rows)} (total={total_downloaded})")
-                            else:
-                                print(f"Downloaded: {os.path.basename(path)}")
-                        except Exception as e:
-                            failures.append((row, str(e)))
-                            print(f"FAILED: {row.url} -> {e}", file=sys.stderr)
+                # Serial / single-threaded PDF downloads (no parallelism).
+                # This is slower but far more reliable for this site.
+                dl_sess = requests.Session()
+                dl_sess.proxies.update(s.proxies)
+                dl_sess.cookies.update(s.cookies)
+
+                def _sort_key(r: PdfRow) -> tuple[int, str]:
+                    # Serial-first; unknown serials go last, stable by URL.
+                    return (r.serial if r.serial is not None else 10**9, r.url)
+
+                for row in sorted(pdf_rows, key=_sort_key):
+                    try:
+                        path = _download_pdf(dl_sess, row, out_dir)
+                        completed += 1
+                        total_downloaded += 1
+                        if pending_urls is not None:
+                            pending_urls.discard(row.url)
+                        if completed % 5 == 0 or completed == len(pdf_rows):
+                            print(f"Downloaded {completed}/{len(pdf_rows)} (total={total_downloaded})")
+                        else:
+                            print(f"Downloaded: {os.path.basename(path)}")
+                        # Tiny pacing helps reduce server resets.
+                        time.sleep(0.15)
+                    except Exception as e:
+                        failures.append((row, str(e)))
+                        print(f"FAILED: {row.url} -> {e}", file=sys.stderr)
+                        # Brief pause before continuing to next doc.
+                        time.sleep(0.5)
 
                 if failures:
                     fail_log = os.path.join(out_dir, "failed_pdf_downloads.txt")
