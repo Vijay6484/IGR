@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import binascii
 import json
 import os
 import random
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -2461,7 +2463,15 @@ TESSERACT_CAPTCHA_MAX_ATTEMPTS = 100
 # ROTATE_IP_SCRIPT=/path/to/rotate.sh          (bash; executable)
 # Tor-only mode (no PROXY_LIST):
 # - USE_TOR=1 (routes via TOR_SOCKS_PROXY; default socks5h://127.0.0.1:9050)
-# - TOR_ROTATE_COMMAND can be used as fallback rotate command (default: sudo systemctl restart tor)
+# - Prefer Tor control NEWNYM (new exit IP) when USE_TOR=1: enable in torrc:
+#     ControlPort 9051
+#     CookieAuthentication 1   # then set TOR_CONTROL_COOKIE_PATH=/var/run/tor/control.authcookie (path varies)
+#   TOR_CONTROL_HOST / TOR_CONTROL_PORT / TOR_CONTROL_PASSWORD / TOR_CONTROL_COOKIE_PATH
+#   TOR_NEWMYM_WAIT_SEC=8      (wait after NEWNYM for circuit to build)
+#   TOR_USE_NEWMYM=0           (disable NEWNYM; use TOR_ROTATE_COMMAND only)
+# - TOR_ROTATE_COMMAND fallback if NEWNYM fails (default: sudo systemctl restart tor)
+# TOR_LOG_IP=1                 (log egress IP to stderr after each rotate; for debugging)
+# DAILY_LIMIT_ROTATE_BURST=N   (after IP-quota message, run N extra full rotates on top of the default 1)
 # India-only egress (recommended for IGR): REQUIRE_INDIA_EGRESS=1 or REQUIRED_EGRESS_COUNTRY=IN
 # EGRESS_COUNTRY_VERIFY_MAX_ATTEMPTS=5       (retries per _rotate_ip when country wrong)
 
@@ -2707,6 +2717,116 @@ def _tor_socks_proxy() -> str:
     return os.environ.get("TOR_SOCKS_PROXY", "").strip() or "socks5h://127.0.0.1:9050"
 
 
+def _tor_control_recv_banner(sock: socket.socket) -> bytes:
+    """Read initial Tor control replies until a full line is available (best-effort)."""
+    buf = b""
+    for _ in range(50):
+        try:
+            chunk = sock.recv(4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+        if b"\r\n" in buf:
+            break
+    return buf
+
+
+def _tor_control_read_reply(sock: socket.socket) -> list[str]:
+    """Read replies until a status line (250/515/5xx) is complete."""
+    lines: list[str] = []
+    buf = b""
+    for _ in range(200):
+        try:
+            chunk = sock.recv(8192)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+        while b"\r\n" in buf:
+            line, buf = buf.split(b"\r\n", 1)
+            if not line:
+                continue
+            text = line.decode("utf-8", errors="replace")
+            lines.append(text)
+            if text.startswith(("250", "515", "550", "552")):
+                return lines
+    return lines
+
+
+def _tor_signal_newnym() -> bool:
+    """
+    Ask Tor for a new circuit (new exit IP) via the control port.
+    This is usually better than restarting the tor daemon for IP-only rate limits.
+
+    Env:
+      TOR_CONTROL_HOST (default 127.0.0.1)
+      TOR_CONTROL_PORT (default 9051)
+      TOR_CONTROL_PASSWORD — if set, AUTHENTICATE "password"
+      TOR_CONTROL_COOKIE_PATH — if set, cookie-file auth (hex)
+      TOR_USE_NEWMYM — default 1 when USE_TOR=1; set 0 to skip and use restart only
+    """
+    if os.getenv("TOR_USE_NEWMYM", "1").strip().lower() in ("0", "false", "no"):
+        return False
+    host = os.environ.get("TOR_CONTROL_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.environ.get("TOR_CONTROL_PORT", "9051"))
+    pwd = os.environ.get("TOR_CONTROL_PASSWORD", "")
+    cookie_path = os.environ.get("TOR_CONTROL_COOKIE_PATH", "").strip()
+
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(30)
+        sock.connect((host, port))
+        _tor_control_recv_banner(sock)
+
+        if cookie_path and os.path.isfile(cookie_path):
+            with open(cookie_path, "rb") as f:
+                cookie = f.read()
+            auth_line = b"AUTHENTICATE " + binascii.hexlify(cookie) + b"\r\n"
+        elif pwd:
+            auth_line = f'AUTHENTICATE "{pwd}"\r\n'.encode("utf-8")
+        else:
+            auth_line = b'AUTHENTICATE ""\r\n'
+
+        sock.sendall(auth_line)
+        auth_lines = _tor_control_read_reply(sock)
+        if not any(x.startswith("250") for x in auth_lines):
+            print(f"Tor AUTHENTICATE failed: {auth_lines}", file=sys.stderr)
+            return False
+
+        sock.sendall(b"SIGNAL NEWNYM\r\n")
+        newnym_lines = _tor_control_read_reply(sock)
+        if not any(x.startswith("250") for x in newnym_lines):
+            print(f"Tor SIGNAL NEWNYM failed: {newnym_lines}", file=sys.stderr)
+            return False
+        return True
+    except OSError as e:
+        print(f"Tor control NEWNYM socket error: {e}", file=sys.stderr)
+        return False
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _log_session_egress_ip(session: requests.Session, label: str) -> None:
+    if os.getenv("TOR_LOG_IP", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    for url in ("https://ifconfig.io/ip", "https://api.ipify.org", "https://icanhazip.com"):
+        try:
+            r = session.get(url, timeout=20)
+            if r.status_code == 200 and r.text.strip():
+                print(f"[egress-ip] {label}: {r.text.strip()}", file=sys.stderr)
+                return
+        except Exception:
+            continue
+
+
 def _apply_proxy_to_session(session: requests.Session) -> None:
     global _proxy_index
     urls = _proxy_urls()
@@ -2770,25 +2890,45 @@ def _rotate_ip(session: requests.Session) -> None:
     attempts = max_tries if need else 1
 
     for _ in range(attempts):
-        cmd = os.environ.get("ROTATE_IP_COMMAND", "").strip()
-        if not cmd and _tor_enabled():
-            cmd = os.environ.get("TOR_ROTATE_COMMAND", "").strip() or "sudo systemctl restart tor"
-        if cmd:
-            subprocess.run(cmd, shell=True, timeout=180, check=False)
-        script = os.environ.get("ROTATE_IP_SCRIPT", "").strip()
-        if script:
-            p = os.path.expanduser(script)
-            if os.path.isfile(p):
-                subprocess.run(["bash", p], timeout=180, check=False)
         urls = _proxy_urls()
-        if urls:
-            _proxy_index += 1
+        # Tor: prefer NEWNYM (new exit IP) over full daemon restart — faster and more reliable for IP quotas.
+        if _tor_enabled() and not urls:
+            if _tor_signal_newnym():
+                wait_s = float(os.environ.get("TOR_NEWMYM_WAIT_SEC", "8"))
+                time.sleep(max(0.0, wait_s))
+            else:
+                cmd = os.environ.get("ROTATE_IP_COMMAND", "").strip()
+                if not cmd:
+                    cmd = os.environ.get("TOR_ROTATE_COMMAND", "").strip() or "sudo systemctl restart tor"
+                if cmd:
+                    subprocess.run(cmd, shell=True, timeout=180, check=False)
+                time.sleep(float(os.environ.get("TOR_RESTART_WAIT_SEC", "5")))
+            script = os.environ.get("ROTATE_IP_SCRIPT", "").strip()
+            if script:
+                p = os.path.expanduser(script)
+                if os.path.isfile(p):
+                    subprocess.run(["bash", p], timeout=180, check=False)
+        else:
+            cmd = os.environ.get("ROTATE_IP_COMMAND", "").strip()
+            if not cmd and _tor_enabled():
+                cmd = os.environ.get("TOR_ROTATE_COMMAND", "").strip() or "sudo systemctl restart tor"
+            if cmd:
+                subprocess.run(cmd, shell=True, timeout=180, check=False)
+            script = os.environ.get("ROTATE_IP_SCRIPT", "").strip()
+            if script:
+                p = os.path.expanduser(script)
+                if os.path.isfile(p):
+                    subprocess.run(["bash", p], timeout=180, check=False)
+            if urls:
+                _proxy_index += 1
         session.cookies.clear()
         _apply_proxy_to_session(session)
         if not need:
+            _log_session_egress_ip(session, "after-rotate")
             return
         cc = _fetch_egress_country(session)
         if cc == need:
+            _log_session_egress_ip(session, "after-rotate")
             return
     raise RuntimeError("Could not obtain required egress country after rotation attempts.")
 
@@ -3201,9 +3341,15 @@ def main() -> int:
                             + (f" Warning='{why}'" if why else ""),
                             file=sys.stderr,
                         )
-                        s = _safe_rotate_and_new_session(s)
+                        burst = max(0, int(os.getenv("DAILY_LIMIT_ROTATE_BURST", "0")))
+                        total_rotations = 1 + burst
+                        wait_between = float(os.getenv("TOR_NEWMYM_WAIT_SEC", "8"))
+                        for br in range(total_rotations):
+                            s = _safe_rotate_and_new_session(s)
+                            if br + 1 < total_rotations:
+                                time.sleep(max(0.0, wait_between))
                         attempt -= 1
-                        time.sleep(6.0)
+                        time.sleep(float(os.getenv("DAILY_LIMIT_POST_ROTATE_SLEEP_SEC", "6")))
                         continue
 
                     if _has_invalid_captcha(last_html):
