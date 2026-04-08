@@ -3105,177 +3105,181 @@ def main() -> int:
                 state["status"] = "running"
                 _save_checkpoint(cp_path, state)
 
-            last_html: str | None = None
-            attempt = 0
-            while attempt < TESSERACT_CAPTCHA_MAX_ATTEMPTS:
-                attempt += 1
-                try:
-                    h1 = dict(FIRSTGET_HEADERS)
-                    ck1 = _cookie_header_from_session(s)
-                    if ck1:
-                        h1["Cookie"] = ck1
-                    r1 = s.get(first_url, headers=h1, timeout=40)
-                    r1.raise_for_status()
-                    hidden_csrf = _extract_csrf_hidden(r1.text)
-                except requests.RequestException as e:
-                    # RemoteDisconnected / timeouts happen frequently during throttling.
-                    print(
-                        f"Network error on first GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
-                        file=sys.stderr,
-                    )
-                    time.sleep(_net_retry_sleep_s(attempt))
-                    # Rotate + fresh session after repeated network errors.
-                    if attempt % 3 == 0:
+                last_html: str | None = None
+                attempt = 0
+                while attempt < TESSERACT_CAPTCHA_MAX_ATTEMPTS:
+                    attempt += 1
+                    try:
+                        h1 = dict(FIRSTGET_HEADERS)
+                        ck1 = _cookie_header_from_session(s)
+                        if ck1:
+                            h1["Cookie"] = ck1
+                        r1 = s.get(first_url, headers=h1, timeout=40)
+                        r1.raise_for_status()
+                        hidden_csrf = _extract_csrf_hidden(r1.text)
+                    except requests.RequestException as e:
+                        # RemoteDisconnected / timeouts happen frequently during throttling.
+                        print(
+                            f"Network error on first GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                            file=sys.stderr,
+                        )
+                        time.sleep(_net_retry_sleep_s(attempt))
+                        # Rotate + fresh session after repeated network errors.
+                        if attempt % 3 == 0:
+                            s = _safe_rotate_and_new_session(s)
+                        continue
+
+                    try:
+                        h2 = dict(CAPTCHA_HEADERS)
+                        ck2 = _cookie_header_from_session(s)
+                        if ck2:
+                            h2["Cookie"] = ck2
+                        r2 = s.get(captcha_url, headers=h2, timeout=40)
+                        r2.raise_for_status()
+                    except requests.RequestException as e:
+                        print(
+                            f"Network error on captcha GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                            file=sys.stderr,
+                        )
+                        time.sleep(_net_retry_sleep_s(attempt))
+                        if attempt % 3 == 0:
+                            s = _safe_rotate_and_new_session(s)
+                        continue
+
+                    captcha_text = _solve_captcha_from_png_bytes(r2.content)
+                    if not captcha_text.strip():
+                        time.sleep(0.4)
+                        continue
+
+                    form_dict = dict(DEFAULT_FORM_VALUES)
+                    form_dict["free_text"] = free_text_value
+                    form_dict["taluka_id"] = str(taluka_id)
+                    form_dict["tal_name"] = str(tal_name)
+                    form_dict["village_id"] = str(village_id)
+                    form_dict["village_name"] = village_name
+
+                    form_items = [
+                        ("_csrfToken", hidden_csrf),
+                        ("years", form_dict.get("years", "")),
+                        ("district_id", form_dict.get("district_id", "")),
+                        ("taluka_id", form_dict.get("taluka_id", "")),
+                        ("village_id", form_dict.get("village_id", "")),
+                        ("article_id", form_dict.get("article_id", "")),
+                        ("free_text", form_dict.get("free_text", "")),
+                        ("partyname", form_dict.get("partyname", "")),
+                        ("captcha", captcha_text),
+                        ("dist_name", form_dict.get("dist_name", "")),
+                        ("tal_name", form_dict.get("tal_name", "")),
+                        ("article_name", form_dict.get("article_name", "")),
+                        ("village_name", form_dict.get("village_name", "")),
+                        ("freetext", form_dict.get("freetext", "")),
+                        ("yearsel", form_dict.get("yearsel", "")),
+                    ]
+
+                    try:
+                        h3 = dict(POST_HEADERS)
+                        ck3 = _cookie_header_from_session(s)
+                        if ck3:
+                            h3["Cookie"] = ck3
+                        r3 = s.post(post_url, headers=h3, data=form_items, timeout=60)
+                        r3.raise_for_status()
+                        last_html = r3.text
+                    except requests.RequestException as e:
+                        print(
+                            f"Network error on search POST (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                            file=sys.stderr,
+                        )
+                        time.sleep(_net_retry_sleep_s(attempt))
+                        if attempt % 3 == 0:
+                            s = _safe_rotate_and_new_session(s)
+                        continue
+
+                    if _has_daily_search_limit_exceeded(last_html):
+                        why = _daily_limit_reason(last_html)
+                        print(
+                            "Daily search limit exceeded; rotating IP and retrying (does not count as captcha attempt)."
+                            + (f" Warning='{why}'" if why else ""),
+                            file=sys.stderr,
+                        )
                         s = _safe_rotate_and_new_session(s)
-                    continue
+                        attempt -= 1
+                        time.sleep(6.0)
+                        continue
 
-                try:
-                    h2 = dict(CAPTCHA_HEADERS)
-                    ck2 = _cookie_header_from_session(s)
-                    if ck2:
-                        h2["Cookie"] = ck2
-                    r2 = s.get(captcha_url, headers=h2, timeout=40)
-                    r2.raise_for_status()
-                except requests.RequestException as e:
+                    if _has_invalid_captcha(last_html):
+                        print(f"Invalid captcha (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}). Retrying...")
+                        time.sleep(0.4)
+                        continue
+                    break
+
+                if last_html is None:
                     print(
-                        f"Network error on captcha GET (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
+                        "Search failed (no HTML after captcha attempts).",
                         file=sys.stderr,
                     )
-                    time.sleep(_net_retry_sleep_s(attempt))
-                    if attempt % 3 == 0:
-                        s = _safe_rotate_and_new_session(s)
-                    continue
+                    _save_checkpoint(cp_path, state)
+                    return 1
 
-                captcha_text = _solve_captcha_from_png_bytes(r2.content)
-                if not captcha_text.strip():
-                    time.sleep(0.4)
-                    continue
-
-                form_dict = dict(DEFAULT_FORM_VALUES)
-                form_dict["free_text"] = free_text_value
-                form_dict["taluka_id"] = str(taluka_id)
-                form_dict["tal_name"] = str(tal_name)
-                form_dict["village_id"] = str(village_id)
-                form_dict["village_name"] = village_name
-
-                form_items = [
-                    ("_csrfToken", hidden_csrf),
-                    ("years", form_dict.get("years", "")),
-                    ("district_id", form_dict.get("district_id", "")),
-                    ("taluka_id", form_dict.get("taluka_id", "")),
-                    ("village_id", form_dict.get("village_id", "")),
-                    ("article_id", form_dict.get("article_id", "")),
-                    ("free_text", form_dict.get("free_text", "")),
-                    ("partyname", form_dict.get("partyname", "")),
-                    ("captcha", captcha_text),
-                    ("dist_name", form_dict.get("dist_name", "")),
-                    ("tal_name", form_dict.get("tal_name", "")),
-                    ("article_name", form_dict.get("article_name", "")),
-                    ("village_name", form_dict.get("village_name", "")),
-                    ("freetext", form_dict.get("freetext", "")),
-                    ("yearsel", form_dict.get("yearsel", "")),
-                ]
-
-                try:
-                    h3 = dict(POST_HEADERS)
-                    ck3 = _cookie_header_from_session(s)
-                    if ck3:
-                        h3["Cookie"] = ck3
-                    r3 = s.post(post_url, headers=h3, data=form_items, timeout=60)
-                    r3.raise_for_status()
-                    last_html = r3.text
-                except requests.RequestException as e:
-                    print(
-                        f"Network error on search POST (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}): {e}",
-                        file=sys.stderr,
-                    )
-                    time.sleep(_net_retry_sleep_s(attempt))
-                    if attempt % 3 == 0:
-                        s = _safe_rotate_and_new_session(s)
-                    continue
-
-                if _has_daily_search_limit_exceeded(last_html):
-                    why = _daily_limit_reason(last_html)
-                    print(
-                        "Daily search limit exceeded; rotating IP and retrying (does not count as captcha attempt)."
-                        + (f" Warning='{why}'" if why else ""),
-                        file=sys.stderr,
-                    )
-                    s = _safe_rotate_and_new_session(s)
-                    attempt -= 1
-                    time.sleep(6.0)
-                    continue
-
-                if _has_invalid_captcha(last_html):
-                    print(f"Invalid captcha (attempt {attempt}/{TESSERACT_CAPTCHA_MAX_ATTEMPTS}). Retrying...")
-                    time.sleep(0.4)
-                    continue
-                break
-
-            if last_html is None:
-                print(
-                    "Search failed (no HTML after captcha attempts).",
-                    file=sys.stderr,
+                headers, rows = _parse_table(last_html)
+                out_path = _upsert_village_data_json(
+                    output_root=output_root,
+                    yearsel=yearsel,
+                    dist_name=dist_name,
+                    tal_name=tal_name,
+                    taluka_id=taluka_id,
+                    village_name=village_name,
+                    village_id=village_id,
+                    free_text=free_text,
+                    headers=headers,
+                    rows=rows,
                 )
-                _save_checkpoint(cp_path, state)
-                return 1
+                total_rows += len(rows)
+                # Optionally remove older free_text_*.json files if present.
+                legacy_deleted = _delete_legacy_free_text_files_in_village_dir(os.path.dirname(out_path))
+                if legacy_deleted:
+                    print(f"Deleted {legacy_deleted} legacy free_text_*.json file(s) in {os.path.dirname(out_path)}")
+                print(f"Updated village data.json (+{len(rows)} row(s)) at {out_path}")
 
-            headers, rows = _parse_table(last_html)
-            out_path = _upsert_village_data_json(
-                output_root=output_root,
-                yearsel=yearsel,
-                dist_name=dist_name,
-                tal_name=tal_name,
-                taluka_id=taluka_id,
-                village_name=village_name,
-                village_id=village_id,
-                free_text=free_text,
-                headers=headers,
-                rows=rows,
-            )
-            total_rows += len(rows)
-            # Optionally remove older free_text_*.json files if present.
-            legacy_deleted = _delete_legacy_free_text_files_in_village_dir(os.path.dirname(out_path))
-            if legacy_deleted:
-                print(f"Deleted {legacy_deleted} legacy free_text_*.json file(s) in {os.path.dirname(out_path)}")
-            print(f"Updated village data.json (+{len(rows)} row(s)) at {out_path}")
+                # Mark done and advance resume.
+                done = set(state.get("completed_pairs") or [])
+                done.add(_pair_key(taluka_id, village_id, free_text))
+                state["completed_pairs"] = sorted(done)
 
-            # Mark done and advance resume.
-            done = set(state.get("completed_pairs") or [])
-            done.add(_pair_key(taluka_id, village_id, free_text))
-            state["completed_pairs"] = sorted(done)
-
-            if free_text + 1 < max_free_text:
-                state["resume"] = {"taluka_id": taluka_id, "village_id": village_id, "free_text": free_text + 1}
-                state["status"] = "running"
-            else:
-                # next village
-                try:
-                    idx = sorted_village_ids.index(village_id)
-                except ValueError:
-                    idx = -1
-                if 0 <= idx + 1 < len(sorted_village_ids):
-                    state["resume"] = {
-                        "taluka_id": taluka_id,
-                        "village_id": sorted_village_ids[idx + 1],
-                        "free_text": 0,
-                    }
+                if free_text + 1 < max_free_text:
+                    state["resume"] = {"taluka_id": taluka_id, "village_id": village_id, "free_text": free_text + 1}
                     state["status"] = "running"
                 else:
-                    # next taluka (if any)
+                    # next village
                     try:
-                        t_idx = sorted_taluka_ids.index(taluka_id)
+                        idx = sorted_village_ids.index(village_id)
                     except ValueError:
-                        t_idx = -1
-                    if 0 <= t_idx + 1 < len(sorted_taluka_ids):
-                        state["resume"] = {"taluka_id": sorted_taluka_ids[t_idx + 1], "village_id": 0, "free_text": 0}
+                        idx = -1
+                    if 0 <= idx + 1 < len(sorted_village_ids):
+                        state["resume"] = {
+                            "taluka_id": taluka_id,
+                            "village_id": sorted_village_ids[idx + 1],
+                            "free_text": 0,
+                        }
                         state["status"] = "running"
                     else:
-                        state["status"] = "completed"
+                        # next taluka (if any)
+                        try:
+                            t_idx = sorted_taluka_ids.index(taluka_id)
+                        except ValueError:
+                            t_idx = -1
+                        if 0 <= t_idx + 1 < len(sorted_taluka_ids):
+                            state["resume"] = {
+                                "taluka_id": sorted_taluka_ids[t_idx + 1],
+                                "village_id": 0,
+                                "free_text": 0,
+                            }
+                            state["status"] = "running"
+                        else:
+                            state["status"] = "completed"
 
-            state["ongoing"] = None
-            _save_checkpoint(cp_path, state)
-            time.sleep(0.25)
+                state["ongoing"] = None
+                _save_checkpoint(cp_path, state)
+                time.sleep(0.25)
 
     state["ongoing"] = None
     state["status"] = "completed"
