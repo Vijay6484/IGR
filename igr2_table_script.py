@@ -3067,14 +3067,29 @@ def main() -> int:
             print(f"Skipping taluka_id={taluka_id} (no villages found in villages_by_taluka_id).", file=sys.stderr)
             continue
 
-        sorted_village_ids = sorted(int(k) for k in villages_map.keys())
+        # Normalize village_id keys to int (some maps use "0"/"1" strings).
+        normalized_villages: dict[int, str] = {}
+        for k, v in villages_map.items():
+            try:
+                ik = int(k)  # works for int keys and "123" string keys
+            except Exception:
+                continue
+            normalized_villages[ik] = str(v)
+
+        sorted_village_ids = sorted(normalized_villages.keys())
         if max_village >= 0:
             sorted_village_ids = sorted_village_ids[: max(0, max_village)]
         if not sorted_village_ids:
             continue
 
+        # If resuming at this taluka but the saved village_id doesn't exist here,
+        # start from this taluka's first village.
+        if taluka_id == resume_tid and resume_vid not in set(sorted_village_ids):
+            resume_vid = sorted_village_ids[0]
+            resume_ft = 0
+
         for village_id in sorted_village_ids:
-            village_name = villages_map[village_id]
+            village_name = normalized_villages[village_id]
             for free_text in range(0, max_free_text):
                 if _should_skip_pair(taluka_id, village_id, free_text, resume_tid, resume_vid, resume_ft):
                     continue
