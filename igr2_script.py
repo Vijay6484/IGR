@@ -908,8 +908,12 @@ def main() -> int:
     tal_name = str(form_meta.get("tal_name", "unknown"))
 
     sorted_village_ids = sorted(village_dict.keys())
+    # MAX_VILLAGE is a *count* limiter for quick testing:
+    # -1 => no limit (all villages)
+    #  0 => process none
+    #  N => process first N villages (in sorted id order)
     if max_village >= 0:
-        sorted_village_ids = sorted_village_ids[:max_village]
+        sorted_village_ids = sorted_village_ids[: max(0, max_village)]
 
     cp_path = _checkpoint_path(out_dir)
     state: dict = _default_checkpoint(
@@ -937,6 +941,11 @@ def main() -> int:
     if not sorted_village_ids:
         print("No villages to process (empty selection or MAX_VILLAGE=0).", file=sys.stderr)
         return 1
+
+    print(
+        f"Processing {len(sorted_village_ids)} village(s): "
+        f"{sorted_village_ids[0]}..{sorted_village_ids[-1]} (MAX_VILLAGE={max_village})"
+    )
 
     resume_vid = int(state["resume"]["village_id"])
     resume_ft = int(state["resume"]["free_text"])
