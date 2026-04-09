@@ -1,0 +1,17 @@
+{
+  "updated_at": "2026-04-09T18:40:00.000000+00:00",
+  "yearsel": "2025",
+  "dist_name": "पुणे",
+  "max_free_text": 10,
+  "max_taluka": -1,
+  "max_village": -1,
+  "status": "running",
+  "resume": {
+    "taluka_id": 1,
+    "village_id": 3,
+    "free_text": 0
+  },
+  "ongoing": null,
+  "completed_pairs": []
+}
+

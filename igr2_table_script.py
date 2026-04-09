@@ -2592,8 +2592,13 @@ def _sanitize_filename_part(s: str) -> str:
     return s or "unknown"
 
 
-def _checkpoint_path(output_root: str) -> str:
-    return os.path.join(output_root, "checkpoint.json")
+def _checkpoint_path(output_root: str, *, yearsel: str) -> str:
+    """
+    Checkpoint file must be per-year so parallel tmux runs don't clobber each other.
+    Stored under: output_table/checkpoints/checkpoint_<year>.json
+    """
+    safe_year = _sanitize_filename_part(str(yearsel))
+    return os.path.join(output_root, "checkpoints", f"checkpoint_{safe_year}.json")
 
 
 def _load_checkpoint(path: str) -> dict | None:
@@ -3197,7 +3202,8 @@ def main() -> int:
         f"{sorted_taluka_ids[0]}..{sorted_taluka_ids[-1]} (MAX_TALUKA={max_taluka})"
     )
 
-    cp_path = _checkpoint_path(output_root)
+    cp_path = _checkpoint_path(output_root, yearsel=yearsel)
+    legacy_cp_path = os.path.join(output_root, "checkpoint.json")
     state: dict = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "yearsel": yearsel,
@@ -3212,6 +3218,9 @@ def main() -> int:
     }
 
     loaded = None if ignore_checkpoint else _load_checkpoint(cp_path)
+    # Back-compat: older runs used output_table/checkpoint.json (single file; not safe for parallel years).
+    if not loaded and not ignore_checkpoint:
+        loaded = _load_checkpoint(legacy_cp_path)
     if loaded:
         if (
             str(loaded.get("yearsel")) == yearsel
@@ -3227,6 +3236,8 @@ def main() -> int:
                 f"village_id={state.get('resume', {}).get('village_id')} "
                 f"free_text={state.get('resume', {}).get('free_text')}"
             )
+            # Ensure we migrate to year-specific checkpoint path.
+            _save_checkpoint(cp_path, state)
 
     # Backwards compatible with older checkpoints that didn't store taluka_id.
     resume_tid = int(state.get("resume", {}).get("taluka_id") or sorted_taluka_ids[0])
