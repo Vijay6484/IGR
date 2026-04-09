@@ -2705,7 +2705,19 @@ def _safe_rotate_and_new_session(session: requests.Session) -> requests.Session:
 def _proxy_urls() -> list[str]:
     raw = os.environ.get("PROXY_LIST", "").strip()
     if raw:
-        return [x.strip() for x in raw.split(",") if x.strip()]
+        urls = [x.strip() for x in raw.split(",") if x.strip()]
+        # Allow session rotation via placeholder expansion in PROXY_LIST:
+        # - Use `{i}` to inject the current proxy index (increments on each rotate).
+        # - Use `{rand}` for a random int per session.
+        # Example (GeoNode): http://user-session-{i}:pass@us.proxy.geonode.io:10000
+        rand = str(random.randint(10**8, 10**12))
+        expanded: list[str] = []
+        for u in urls:
+            if "{i}" in u or "{rand}" in u:
+                expanded.append(u.replace("{i}", str(_proxy_index)).replace("{rand}", rand))
+            else:
+                expanded.append(u)
+        return expanded
 
     # Single-endpoint proxy config (recommended for Smartproxy / gateway-style providers).
     host = os.environ.get("PROXY_HOST", "").strip()
