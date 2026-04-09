@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -2704,9 +2704,31 @@ def _safe_rotate_and_new_session(session: requests.Session) -> requests.Session:
 
 def _proxy_urls() -> list[str]:
     raw = os.environ.get("PROXY_LIST", "").strip()
-    if not raw:
+    if raw:
+        return [x.strip() for x in raw.split(",") if x.strip()]
+
+    # Single-endpoint proxy config (recommended for Smartproxy / gateway-style providers).
+    host = os.environ.get("PROXY_HOST", "").strip()
+    port = os.environ.get("PROXY_PORT", "").strip()
+    user = os.environ.get("PROXY_USER", "").strip()
+    pwd = os.environ.get("PROXY_PASS", "").strip()
+    if not (host and port and user and pwd):
         return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
+
+    scheme = os.environ.get("PROXY_SCHEME", "").strip().lower() or "http"
+    # Encode username/password safely (Smartproxy passwords can contain commas, etc.)
+    user_q = quote(user, safe="")
+    pwd_q = quote(pwd, safe="")
+
+    # Optional: Smartproxy-style session rotation.
+    # If PROXY_SESSION_MODE=smartproxy and PROXY_SESSION_TOKEN is set (default "session"),
+    # we will append "-<token>-<index>" to the username to force a new IP per rotate.
+    session_mode = os.environ.get("PROXY_SESSION_MODE", "").strip().lower()
+    if session_mode == "smartproxy":
+        token = os.environ.get("PROXY_SESSION_TOKEN", "session").strip() or "session"
+        user_q = f"{user_q}-{quote(token, safe='')}-{_proxy_index}"
+
+    return [f"{scheme}://{user_q}:{pwd_q}@{host}:{port}"]
 
 
 def _tor_enabled() -> bool:
