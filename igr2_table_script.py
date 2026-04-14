@@ -22,7 +22,6 @@ from local_captcha_solver import solve_captcha_with_tesseract_from_bytes
 
 
 taluka_ids = {
-    8: "इंदापूर",
     12: "खेड",
     13: "जुन्नर",
     14: "पुणे शहर",
