@@ -3159,6 +3159,13 @@ def main() -> int:
         help="Year selection (maps to form field 'yearsel'), e.g. 2025 or 2026. "
         "Can also be set via env YEARSEL.",
     )
+    parser.add_argument(
+        "-t",
+        "--taluka",
+        nargs="+",
+        default=None,
+        help="Limit run to specific taluka_id(s). Examples: `-t 7 9` or `-t 7,9`.",
+    )
     args = parser.parse_args()
     DEFAULT_FORM_VALUES["yearsel"] = str(args.yearsel)
 
@@ -3177,11 +3184,44 @@ def main() -> int:
     yearsel = str(form_meta.get("yearsel", "unknown"))
     dist_name = str(form_meta.get("dist_name", "unknown"))
     # Taluka loop is the outer loop; villages are selected per taluka_id.
-    sorted_taluka_ids = sorted(int(k) for k in taluka_ids.keys())
-    if max_taluka >= 0:
-        sorted_taluka_ids = sorted_taluka_ids[: max(0, max_taluka)]
+    all_taluka_ids = sorted(int(k) for k in taluka_ids.keys())
+
+    taluka_filter_raw: list[str] = []
+    if args.taluka:
+        for item in args.taluka:
+            if item is None:
+                continue
+            taluka_filter_raw.extend([p for p in str(item).split(",") if p.strip()])
+
+    if taluka_filter_raw:
+        requested: list[int] = []
+        for p in taluka_filter_raw:
+            try:
+                requested.append(int(p))
+            except Exception:
+                print(f"Invalid taluka id in -t/--taluka: '{p}' (must be integer).", file=sys.stderr)
+                return 2
+        # Keep the user's provided order and remove duplicates.
+        seen: set[int] = set()
+        requested_unique: list[int] = []
+        for tid in requested:
+            if tid in seen:
+                continue
+            seen.add(tid)
+            requested_unique.append(tid)
+
+        known = set(all_taluka_ids)
+        missing = [tid for tid in requested_unique if tid not in known]
+        if missing:
+            print(f"WARNING: unknown taluka_id(s) requested and will be skipped: {missing}", file=sys.stderr)
+        sorted_taluka_ids = [tid for tid in requested_unique if tid in known]
+        max_taluka = len(sorted_taluka_ids)
+    else:
+        sorted_taluka_ids = all_taluka_ids
+        if max_taluka >= 0:
+            sorted_taluka_ids = sorted_taluka_ids[: max(0, max_taluka)]
     if not sorted_taluka_ids:
-        print("No talukas to process (empty selection or MAX_TALUKA=0).", file=sys.stderr)
+        print("No talukas to process (empty selection / -t had no valid ids / MAX_TALUKA=0).", file=sys.stderr)
         return 1
 
     # Safety: if import of igr2_script failed, we might be missing supporting dicts,
