@@ -343,6 +343,11 @@ village_dict = {
 }
 
 
+# District id → name (used by scripts that import from igr2_script).
+district_dict = {
+    23: "पुणे",
+}
+
 taluka_dict = {
     5: "आंबेगांव",
     8: "इंदापूर",
