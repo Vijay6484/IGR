@@ -22,12 +22,20 @@ from local_captcha_solver import solve_captcha_with_tesseract_from_bytes
 
 
 taluka_ids = {
+    5: "आंबेगांव",
+    8: "इंदापूर",
     12: "खेड",
     13: "जुन्नर",
+    6: "दौंड",
     14: "पुणे शहर",
+    4: "पुरंदर",
+    7: "बारामती",
     9: "भोर",
     10: "मावळ",
-    11: "शिरुर"
+    2: "मुळशी",
+    3: "वेल्हा",
+    11: "शिरुर",
+    1: "हवेली"
 }
 
 villages_by_taluka_id = {
