@@ -3,51 +3,133 @@ import re
 import os
 import argparse
 
-# ===== LAND PATTERNS (STRICT MATCHING) =====
-LAND_PATTERNS = [
-    r"(?:गट|gut)[^\d]{0,10}(\d+(?:/\d+)*)",
-    r"(?:सर्व्हे|survey|सन)[^\d]{0,10}(\d+(?:/\d+)*)",
-    r"(?:cts|सीटी|सिटी|citysurvey)[^\d]{0,10}(\d+(?:/\d+)*)",
-    r"(?:प्लॉट|plot)[^\d]{0,10}(\d+(?:/\d+)*)",
-    r"(?:भुमापन|भुमा|बुमा)[^\d]{0,10}(\d+(?:/\d+)*)",
-    r"(?:मिळकत|मिक्र|मिनं)[^\d]{0,10}(\d+(?:/\d+)*)"
+# ===================================================================
+# PROPERTY NUMBER EXTRACTION
+# Each entry: (label, [list of regex patterns])
+# The patterns are tried in order; all matches are collected.
+# ===================================================================
+
+PROPERTY_PATTERNS = [
+
+    # ── गट / Gut Number ─────────────────────────────────────────────
+    ("gut_number", [
+        r"(?:गट|gut)\s*(?:क्र(?:मांक)?|नं|नंबर|number|no\.?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"ग\.\s*नं\.?\s*([\d]+(?:[/\-\.]\d+)*)",
+        r"ग\s+नं\.?\s*([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── भुमापन / Bhumapan Number ────────────────────────────────────
+    ("bhumapan_number", [
+        r"(?:भुमापन|भूमापन|bhumapan)\s*(?:क्र(?:मांक)?|नं|नंबर|no\.?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"(?:भुमापन|भूमापन)\s*क्र\.?\s*([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── सर्व्हे / Survey Number ─────────────────────────────────────
+    ("survey_number", [
+        # Marathi: सर्व्हे नं, सर्वे नं, स.न., स.नं., सर्व्हे क्र
+        r"(?:सर्व[्व]{0,2}हे|सर्वे|सर्वेक्षण)\s*(?:नं|नंबर|क्र(?:मांक)?|no\.?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\w+)*)",
+        r"स\.?\s*न\.?\s*(?:ं)?\s*([\d]+(?:[/\-\.]\w+)*)",
+        r"स\.?\s*ना\.?\s*([\d]+(?:[/\-\.]\w+)*)",
+        # English: S.No, S.N, Survey No, SurveyNo
+        r"[Ss](?:urvey)?\s*\.?\s*[Nn][Oo]?\.?\s*([\d]+(?:[/\-\.]\w+)*)",
+        r"[Ss]\.?\s*[Nn](?:o)?\.?\s*([\d]+(?:[/\-\.]\w+)*)",
+    ]),
+
+    # ── CTS / City Survey Number ─────────────────────────────────────
+    ("cts_number", [
+        r"(?:CTS|cts|सिटी\s*सर्व्हे|सि\.?टी\.?\s*सर्व्हे|सि\.?\s*स\.?)\s*(?:नं|नंबर|no\.?|क्र(?:मांक)?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"(?:city\s*survey|citysurvey)\s*(?:no\.?|number)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"सि\.?\s*स\.\s*नं\.?\s*([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── प्लॉट / Plot Number ──────────────────────────────────────────
+    ("plot_number", [
+        r"(?:प्लॉट|plot|खाजगी\s*प्लॉट)\s*(?:नं|नंबर|no\.?|क्र(?:मांक)?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── फ्लॅट / Flat Number ──────────────────────────────────────────
+    ("flat_number", [
+        # Marathi variants: फ्लॅट, फ़्लॅट, फ्लेट, फ्लॅट नं, फ. नं.
+        r"(?:फ[्ष़]?\s*ल[ॅए]\s*ट|flat|apartment)\s*(?:नं|नंबर|no\.?|क्र(?:मांक)?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"फ\.\s*नं\.?\s*([\d]+(?:[/\-\.]\d+)*)",
+        r"Apartment/Flat\s*No[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── शॉप / Shop Number ────────────────────────────────────────────
+    ("shop_number", [
+        r"(?:शॉप|शाप|shop|दुकान)\s*(?:नं|नंबर|no\.?|क्र(?:मांक)?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"Shop\s*No[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── सदनिका / Sadanika Number ─────────────────────────────────────
+    ("sadanika_number", [
+        r"सदनिका\s*(?:नं|नंबर|क्र(?:मांक)?|no\.?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── मिळकत / Milkat Number ────────────────────────────────────────
+    # Only match when an explicit number keyword immediately follows मिळकत
+    # (avoids false positives from "मिळकत गट नं..." which is a gut number)
+    ("milkat_number", [
+        r"मिळकत\s+क्र(?:मांक)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"मिळकत\s+नं(?:बर)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\d+)*)",
+        r"मिळकत\s+क्र\.\s*([\d]+(?:[/\-\.]\d+)*)",
+    ]),
+
+    # ── ब्लॉक / Block ────────────────────────────────────────────────
+    ("block_number", [
+        r"(?:ब्लॉक|block)\s*(?:नं|नंबर|no\.?)?[:\s\.]{0,3}([\w]+)",
+    ]),
+
+    # ── हिस्सा / Hissa Number ─────────────────────────────────────────
+    ("hissa_number", [
+        r"(?:हिस्सा|हिश्या|हिस्स|हिश्स|hissa)\s*(?:नं|नंबर|no\.?)?[:\s\.]{0,3}([\d]+(?:[/\-\.]\w+)*)",
+        r"Hissa\s*No\.?\s*([\d]+(?:[/\-\.]\w+)*)",
+    ]),
 ]
 
-# ===== NORMALIZE NUMBER =====
-def normalize_number(num):
-    num = re.sub(r"[^\d/]", "", num)
-    num = re.sub(r"/+", "/", num)
-    return num.strip()
+# ===================================================================
+# VALIDATION
+# ===================================================================
+INVALID_VALUES = {"00", "0", "no", "n", ""}
 
-# ===== VALIDATION FILTER =====
-def is_valid_land_number(num):
-    if not num:
+def is_valid_value(val):
+    if not val:
         return False
-    if num == "00":
+    val_stripped = val.strip().lower()
+    if val_stripped in INVALID_VALUES:
         return False
-    if len(num) == 1:
+    if len(val_stripped) == 1 and val_stripped.isdigit():
         return False
     return True
 
-# ===== EXTRACT LAND NUMBERS (STRICT) =====
-def extract_land_numbers(text):
-    results = set()
+# ===================================================================
+# EXTRACT ALL PROPERTY NUMBERS
+# Returns a list of dicts: [{"type": "gut_number", "value": "234"}, ...]
+# ===================================================================
+def extract_property_numbers(text):
+    results = []
+    seen = set()  # avoid exact duplicates (type, value)
 
-    for pattern in LAND_PATTERNS:
-        matches = re.findall(pattern, text, flags=re.IGNORECASE)
+    for label, patterns in PROPERTY_PATTERNS:
+        for pattern in patterns:
+            matches = re.findall(pattern, text, flags=re.IGNORECASE)
+            for match in matches:
+                value = match.strip()
+                if not is_valid_value(value):
+                    continue
+                key = (label, value)
+                if key not in seen:
+                    seen.add(key)
+                    results.append({"type": label, "value": value})
 
-        for num in matches:
-            clean = normalize_number(num)
+    return results
 
-            if is_valid_land_number(clean):
-                results.add(clean)
-
-    return list(results)
-
-# ===== PROCESS DATA =====
-def process_data(data, processed_hashes, current_doc_id):
+# ===================================================================
+# PROCESS DATA
+# ===================================================================
+def process_data(data, seen_urls, current_doc_id):
     docs = []
-    
+
     meta = data.get("meta", {})
     free_text_blocks = data.get("free_text", {})
 
@@ -56,27 +138,25 @@ def process_data(data, processed_hashes, current_doc_id):
 
         for row in rows:
             cols = row.get("columns", [])
-            row_url = row.get("url", "")
+            row_url = row.get("url", "").strip()
 
             if len(cols) < 8:
                 continue
+
+            # ── URL-based deduplication ──────────────────────────────
+            if row_url and row_url in seen_urls:
+                continue
+            if row_url:
+                seen_urls.add(row_url)
 
             info_text = cols[7]
 
             if not info_text or len(info_text) < 10:
                 continue
 
-            # Strong Deduplication: Hash the document number and normalized text content
-            normalized_text = re.sub(r'\s+', ' ', info_text).strip()
-            doc_key = f"{cols[1]}_{normalized_text}"
+            property_numbers = extract_property_numbers(info_text)
 
-            if doc_key in processed_hashes:
-                continue
-            processed_hashes.add(doc_key)
-
-            land_numbers = extract_land_numbers(info_text)
-
-            if not land_numbers:
+            if not property_numbers:
                 continue
 
             docs.append({
@@ -89,7 +169,7 @@ def process_data(data, processed_hashes, current_doc_id):
                 "seller_party": cols[5],
                 "buyer_party": cols[6],
                 "text": info_text,
-                "land_numbers": land_numbers,
+                "property_numbers": property_numbers,
                 "pdf_link": row_url,
                 "village": meta.get("village_name"),
                 "taluka": meta.get("tal_name"),
@@ -101,64 +181,70 @@ def process_data(data, processed_hashes, current_doc_id):
 
     return docs, current_doc_id
 
-# ===== MAIN =====
+# ===================================================================
+# MAIN
+# ===================================================================
 def main():
-    parser = argparse.ArgumentParser(description="Index IGR data for a specific village across all years.")
-    parser.add_argument("-d", "--district", required=True, help="District name")
-    parser.add_argument("-t", "--taluka", required=True, help="Taluka name")
-    parser.add_argument("-v", "--village", required=True, help="Village name")
-    
+    parser = argparse.ArgumentParser(
+        description="Index IGR data for a specific village across all years."
+    )
+    parser.add_argument("-d", "--district", required=True, help="District name (e.g. पुणे)")
+    parser.add_argument("-t", "--taluka",   required=True, help="Taluka name (e.g. मावळ)")
+    parser.add_argument("-v", "--village",  required=True, help="Village name (e.g. करुंज)")
+
     args = parser.parse_args()
-    
-    base_dir = "output_table"
+
+    base_dir   = "output_table"
     output_dir = "index_output"
-    
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    all_docs = []
-    processed_hashes = set()
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    all_docs   = []
+    seen_urls  = set()   # URL-based global deduplication
     current_doc_id = 1
-    
-    # Get all years available in the output_table directory
+
     try:
-        years = [y for y in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, y))]
+        years = sorted([
+            y for y in os.listdir(base_dir)
+            if os.path.isdir(os.path.join(base_dir, y)) and y.isdigit()
+        ])
     except FileNotFoundError:
-        print(f"❌ Error: {base_dir} directory not found.")
+        print(f"❌ Error: '{base_dir}' directory not found.")
         return
 
-    print(f"🔍 Searching for data for Village: {args.village}, Taluka: {args.taluka}, District: {args.district}")
-    
-    for year in sorted(years):
-        data_path = os.path.join(base_dir, year, args.district, args.taluka, args.village, "data.json")
-        
-        if os.path.exists(data_path):
-            print(f"📖 Processing Year {year}...")
+    print(f"🔍 District: {args.district} | Taluka: {args.taluka} | Village: {args.village}")
+    print(f"📅 Years found in output_table: {', '.join(years) if years else 'none'}")
+
+    for year in years:
+        data_path = os.path.join(
+            base_dir, year, args.district, args.taluka, args.village, "data.json"
+        )
+
+        if not os.path.exists(data_path):
+            continue
+
+        print(f"   📖 Processing Year {year} → {data_path}")
+        try:
             with open(data_path, "r", encoding="utf-8") as f:
-                try:
-                    data = json.load(f)
-                    processed_year_docs, next_id = process_data(data, processed_hashes, current_doc_id)
-                    all_docs.extend(processed_year_docs)
-                    current_doc_id = next_id
-                except json.JSONDecodeError:
-                    print(f"⚠️ Error: Failed to parse JSON in {data_path}")
-        else:
-            # You might want to skip or log missing years
-            pass
+                data = json.load(f)
+            year_docs, current_doc_id = process_data(data, seen_urls, current_doc_id)
+            all_docs.extend(year_docs)
+            print(f"      ✔  Added {len(year_docs)} unique documents (total so far: {len(all_docs)})")
+        except json.JSONDecodeError:
+            print(f"      ⚠️  Failed to parse JSON in {data_path}")
 
     if not all_docs:
-        print("❌ No data found for the specified location.")
+        print("❌ No indexed documents produced. Check district/taluka/village spelling.")
         return
 
-    # Create output filename
-    # Sanitize names for filename (replace spaces with underscores if needed, or keep as is)
-    filename = f"{args.district}_{args.taluka}_{args.village}.json".replace("/", "-")
-    output_path = os.path.join(output_dir, filename)
-    
+    # Output filename: district_taluka_village.json  (/ replaced with -)
+    safe_name = f"{args.district}_{args.taluka}_{args.village}".replace("/", "-").replace(" ", "_")
+    output_path = os.path.join(output_dir, f"{safe_name}.json")
+
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_docs, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Done! Created index with {len(all_docs)} unique documents at: {output_path}")
+    print(f"\n✅ Done! {len(all_docs)} unique documents indexed → {output_path}")
 
 if __name__ == "__main__":
     main()
