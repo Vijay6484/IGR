@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+index_output
 output_table
 # Google OAuth token cache
 token.json
