@@ -180,11 +180,10 @@ def process_data(data, current_doc_id):
 # ===================================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="Index IGR data for a specific village across all years."
+        description="Index IGR data for all villages in a taluka across all years."
     )
     parser.add_argument("-d", "--district", required=True, help="District name (e.g. पुणे)")
     parser.add_argument("-t", "--taluka",   required=True, help="Taluka name (e.g. मावळ)")
-    parser.add_argument("-v", "--village",  required=True, help="Village name (e.g. करुंज)")
 
     args = parser.parse_args()
 
@@ -192,9 +191,6 @@ def main():
     output_dir = "index_output"
 
     os.makedirs(output_dir, exist_ok=True)
-
-    all_docs       = []
-    current_doc_id = 1
 
     try:
         years = sorted([
@@ -205,40 +201,70 @@ def main():
         print(f"❌ Error: '{base_dir}' directory not found.")
         return
 
-    print(f"🔍 District: {args.district} | Taluka: {args.taluka} | Village: {args.village}")
+    print(f"🔍 District: {args.district} | Taluka: {args.taluka}")
     print(f"📅 Years found in output_table: {', '.join(years) if years else 'none'}")
 
+    # 1. Collect all unique villages across all years for this district/taluka
+    villages = set()
     for year in years:
-        data_path = os.path.join(
-            base_dir, year, args.district, args.taluka, args.village, "data.json"
-        )
+        taluka_path = os.path.join(base_dir, year, args.district, args.taluka)
+        if os.path.exists(taluka_path):
+            try:
+                v_list = [v for v in os.listdir(taluka_path) 
+                         if os.path.isdir(os.path.join(taluka_path, v))]
+                villages.update(v_list)
+            except Exception as e:
+                print(f"      ⚠️  Error reading {taluka_path}: {e}")
 
-        if not os.path.exists(data_path):
-            continue
-
-        print(f"   📖 Processing Year {year} → {data_path}")
-        try:
-            with open(data_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            year_docs, current_doc_id = process_data(data, current_doc_id)
-            all_docs.extend(year_docs)
-            print(f"      ✔  Added {len(year_docs)} unique documents (total so far: {len(all_docs)})")
-        except json.JSONDecodeError:
-            print(f"      ⚠️  Failed to parse JSON in {data_path}")
-
-    if not all_docs:
-        print("❌ No indexed documents produced. Check district/taluka/village spelling.")
+    if not villages:
+        print(f"❌ No villages found for District: {args.district}, Taluka: {args.taluka}")
         return
 
-    # Output as: index_output/<district>/<taluka>/<village>/data.json
-    village_dir = os.path.join(output_dir, args.district, args.taluka, args.village)
-    os.makedirs(village_dir, exist_ok=True)
-    output_path = os.path.join(village_dir, "data.json")
+    sorted_villages = sorted(list(villages))
+    print(f"🏘️  Found {len(sorted_villages)} villages to process.\n")
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(all_docs, f, ensure_ascii=False, indent=2)
+    for village in sorted_villages:
+        print(f"🚀 Processing Village: {village}")
+        all_docs = []
+        current_doc_id = 1
 
-    print(f"\n✅ Done! {len(all_docs)} unique documents indexed → {output_path}")
+        for year in years:
+            data_path = os.path.join(
+                base_dir, year, args.district, args.taluka, village, "data.json"
+            )
+
+            if not os.path.exists(data_path):
+                continue
+
+            print(f"   📖 Processing Year {year} → {data_path}")
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                year_docs, current_doc_id = process_data(data, current_doc_id)
+                all_docs.extend(year_docs)
+                print(f"      ✔  Added {len(year_docs)} documents (village total: {len(all_docs)})")
+            except json.JSONDecodeError:
+                print(f"      ⚠️  Failed to parse JSON in {data_path}")
+            except Exception as e:
+                print(f"      ⚠️  Error processing {data_path}: {e}")
+
+        if not all_docs:
+            print(f"   ⚠️  No documents found for {village}. skipping output.")
+            continue
+
+        # Output as: index_output/<district>/<taluka>/<village>/data.json
+        village_dir = os.path.join(output_dir, args.district, args.taluka, village)
+        os.makedirs(village_dir, exist_ok=True)
+        output_path = os.path.join(village_dir, "data.json")
+
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(all_docs, f, ensure_ascii=False, indent=2)
+            print(f"   ✅ Saved {len(all_docs)} unique documents → {output_path}\n")
+        except Exception as e:
+            print(f"   ❌ Error saving to {output_path}: {e}")
+
+    print(f"\n✨ All villages in {args.taluka} have been processed.")
 
 if __name__ == "__main__":
     main()
